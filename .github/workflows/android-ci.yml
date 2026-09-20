@@ -151,10 +151,10 @@ jobs:
         env:
           TEST_ANNOTATE: |
             lines = open('test.txt', errors='replace').read().splitlines()
-            idx = [i for i, l in enumerate(lines) if '[E]' in l]
+            idx = [i for i, l in enumerate(lines) if 'EXCEPTION CAUGHT' in l]
             for i in idx[:20]:
-                block = lines[i:i + 12]
-                msg = ' | '.join(x.strip() for x in block if x.strip())[:900]
+                block = [x.strip() for x in lines[i:i + 30] if x.strip()]
+                msg = ' | '.join(block)[:1200]
                 print('::error title=flutter test::' + msg.replace('%', '%25'))
 
   build:

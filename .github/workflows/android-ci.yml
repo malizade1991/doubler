@@ -131,7 +131,31 @@ jobs:
           done
 
       - name: Run tests
-        run: flutter test
+        id: tests
+        run: |
+          set -o pipefail
+          flutter test --reporter expanded 2>&1 | tee test.txt
+
+      - name: Publish test failures
+        if: ${{ always() && steps.tests.outcome == 'failure' }}
+        run: |
+          {
+            echo "### \`flutter test\` failures"
+            echo
+            echo '```'
+            grep -E '^(\[E\]|[[:space:]]*Expected:|[[:space:]]*Actual:|.*\[E\])|failed|Exception' test.txt | head -100 || tail -100 test.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Emit the failure text itself as annotations (readable via the checks API).
+          python3 -c "$TEST_ANNOTATE"
+        env:
+          TEST_ANNOTATE: |
+            lines = open('test.txt', errors='replace').read().splitlines()
+            idx = [i for i, l in enumerate(lines) if '[E]' in l]
+            for i in idx[:20]:
+                block = lines[i:i + 12]
+                msg = ' | '.join(x.strip() for x in block if x.strip())[:900]
+                print('::error title=flutter test::' + msg.replace('%', '%25'))
 
   build:
     name: Build Android artifacts

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand signal teal. Keep in sync with lib/core/theme/app_colors.dart (AppColors.signal). -->
+    <color name="ic_launcher_background">#0E6B7A</color>
+</resources>

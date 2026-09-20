@@ -1,0 +1,14 @@
+# Keep the SHA-pinned GitHub Actions up to date. Dependabot understands
+# `uses: owner/repo@sha` and will open PRs that bump both the SHA and the
+# trailing `# vX.Y.Z` comment, preserving the immutability guarantee.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "ci"
+      - "dependencies"

@@ -4,6 +4,18 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+// Release signing is driven by `android/key.properties` (gitignored). The CI
+// release job writes that file from GitHub Secrets before invoking Gradle.
+// Local builds that have no key.properties keep the historical behaviour of
+// signing with the debug keystore; production GitHub Releases are gated in CI
+// so a debug-signed APK is never published as a release artifact.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+def hasReleaseKeystore = keystoreProperties.getProperty("storeFile") != null
+
 android {
     namespace = "com.doubler.doubler"
     compileSdk = flutter.compileSdkVersion
@@ -26,9 +38,23 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        release {
+            // Populated only when key.properties provides a storeFile.
+            if (hasReleaseKeystore) {
+                storeFile = file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig = signingConfigs.debug
+            // Prefer the real release keystore when configured; otherwise fall
+            // back to the debug keystore for local/dev builds only.
+            signingConfig = hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
     }
 }

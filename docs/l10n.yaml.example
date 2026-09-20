@@ -1,0 +1,23 @@
+# INACTIVE sample config for `flutter gen-l10n` — do NOT copy this to the repo root.
+#
+# While a `l10n.yaml` exists at the repo root, `flutter analyze` / `flutter pub get`
+# try to generate the synthetic `package:flutter_gen` localizations and fail with:
+#
+#   Error: Attempted to generate localizations code without having the
+#   flutter: generate flag turned on.
+#
+# This project does NOT use generated localizations: `lib/core/l10n/app_localizations.dart`
+# is hand-written and backed by `lib/core/l10n/l10n_tables.dart`. The ARB files in
+# `lib/core/l10n/` are source data only. See docs/CI.md ("Localization landmine").
+#
+# If the project ever migrates to gen-l10n, move this file back to the repo root,
+# add `generate: true` under `flutter:` in pubspec.yaml, and change
+# `output-localization-file` so the hand-written class is not overwritten.
+
+arb-dir: lib/core/l10n
+template-arb-file: app_fa.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false
+preferred-supported-locales:
+  - fa

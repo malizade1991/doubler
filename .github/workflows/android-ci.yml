@@ -22,9 +22,10 @@
 # `flutter_localizations` still pins `intl: 0.19.0` (required by `intl: ^0.19.0` in
 # pubspec) and whose Gradle/AGP validation matches AGP 8.7.0 / Gradle 8.10.2 here.
 #
-# IMPORTANT (l10n landmine): do NOT add `generate: true` to pubspec.yaml and do NOT
-# run `flutter gen-l10n` in CI. `lib/core/l10n/app_localizations.dart` is
-# hand-written; the ARB files are only source data. See docs/CI.md.
+# IMPORTANT (l10n landmine): do NOT add `generate: true` to pubspec.yaml, do NOT
+# run `flutter gen-l10n` in CI, and do NOT add an `l10n.yaml` at the repo root
+# (its presence alone makes `flutter analyze` fail). `lib/core/l10n/app_localizations.dart`
+# is hand-written; the ARB files are only source data. See docs/CI.md.
 
 name: Android CI / Release
 
@@ -80,6 +81,13 @@ jobs:
 
       - name: Flutter doctor (diagnostics)
         run: flutter doctor -v
+
+      - name: Guard — no root l10n.yaml (breaks analyze, see docs/CI.md)
+        run: |
+          if [ -f l10n.yaml ]; then
+            echo "::error file=l10n.yaml::A root l10n.yaml makes 'flutter analyze' attempt synthetic-package generation and fail. Keep the sample at docs/l10n.yaml.example."
+            exit 1
+          fi
 
       - name: Fetch dependencies
         run: flutter pub get

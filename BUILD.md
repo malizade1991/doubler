@@ -1,0 +1,50 @@
+# BUILD.md
+
+## Prerequisites
+
+- Flutter stable (SDK `>=3.5.0 <4.0.0` in pubspec)
+- Android SDK; Xcode for iOS
+- **No backend to deploy**
+
+This sandbox could not download the Dart SDK (`storage.googleapis.com`). Build on a machine with Flutter installed.
+
+## Commands
+
+```
+flutter pub get
+flutter test
+flutter analyze
+flutter build apk --release
+flutter build appbundle --release
+flutter build ios --release   # macOS
+```
+
+## Permissions
+
+Android: `RECORD_AUDIO`, `INTERNET`  
+iOS: `NSMicrophoneUsageDescription` (Persian in Info.plist)
+
+Optional later: Android foreground service for long background sessions.
+
+## Fonts
+
+Bundle Vazirmatn under `assets/fonts/` when you can fetch the TTFs.
+
+## Secrets
+
+- No committed API keys
+- Users paste keys in-app (secure storage seam)
+- Test fixtures use obviously fake `AIzaSyDummy…` strings only
+
+## Icons
+
+Replace default launcher when designing store assets. Brand: DOUBLER / دوبلر — original, not Dubingo.
+
+## Release checklist
+
+- [ ] `flutter test` / `flutter analyze` clean
+- [ ] No real keys in git
+- [ ] Privacy copy matches PRIVACY.md
+- [ ] Mic permission strings localized
+- [ ] Store listing from `docs/STORE.md`
+- [ ] Manual: real Gemini key, headphones, Persian↔English

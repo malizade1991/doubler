@@ -40,6 +40,16 @@ Bundle Vazirmatn under `assets/fonts/` when you can fetch the TTFs.
 
 Replace default launcher when designing store assets. Brand: DOUBLER / دوبلر — original, not Dubingo.
 
+## CI/CD (GitHub Actions)
+
+Android builds and releases are automated by `.github/workflows/android-ci.yml`:
+PR / push to `main` run analyze + test + build; a `vX.Y.Z` tag builds signed split-per-ABI
+APKs + an AAB and publishes a GitHub Release. Full setup (signing secrets, triggers, artifact
+paths, downloads) is in [docs/CI.md](docs/CI.md).
+
+> ⚠️ Do **not** add `generate: true` to `pubspec.yaml` or run `flutter gen-l10n`: the checked-in
+> `lib/core/l10n/app_localizations.dart` is hand-written and would be overwritten. See docs/CI.md.
+
 ## Release checklist
 
 - [ ] `flutter test` / `flutter analyze` clean

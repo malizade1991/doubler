@@ -23,4 +23,11 @@ ios/ServiceDefinitions.json
 .flutter-plugins-dependencies
 .env
 *.jks
+*.keystore
+*.p12
+*.pem
 key.properties
+android/key.properties
+android/app/*.jks
+# Decoded release keystores (CI writes these from Secrets, never commit)
+release-keystore.*

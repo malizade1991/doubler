@@ -98,8 +98,8 @@ jobs:
           set -o pipefail
           flutter analyze --fatal-infos --fatal-warnings 2>&1 | tee analyze.txt
 
-      # Mirror findings into the job summary so they are readable without
-      # downloading raw logs (which require extra permissions/tooling).
+      # Mirror findings into the job summary AND as inline annotations, so they are
+      # readable without downloading raw logs (which need extra permissions/tooling).
       - name: Publish analyzer findings
         if: ${{ always() && steps.analyze.outcome == 'failure' }}
         run: |
@@ -110,6 +110,25 @@ jobs:
             cat analyze.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+          # Lines look like: "  info • Message here • lib/foo.dart:12:5 • rule_name"
+          sed -n 's/^[[:space:]]*\(info\|warning\|error\)[[:space:]]*•[[:space:]]*/\1•/p' analyze.txt |
+          while IFS= read -r line; do
+            sev="${line%%•*}"
+            rest="${line#*•}"
+            msg="$(printf '%s' "$rest" | awk -F' • ' '{print $1}')"
+            loc="$(printf '%s' "$rest" | awk -F' • ' '{print $2}')"
+            rule="$(printf '%s' "$rest" | awk -F' • ' '{print $3}')"
+            file="$(printf '%s' "$loc" | cut -d: -f1)"
+            ln="$(printf '%s' "$loc" | cut -d: -f2)"
+            col="$(printf '%s' "$loc" | cut -d: -f3)"
+            case "$sev" in
+              error) lvl=error ;;
+              warning) lvl=warning ;;
+              *) lvl=notice ;;
+            esac
+            echo "::${lvl} file=${file},line=${ln:-1},col=${col:-1},title=flutter analyze (${rule:-$sev})::${msg}"
+          done
 
       - name: Run tests
         run: flutter test

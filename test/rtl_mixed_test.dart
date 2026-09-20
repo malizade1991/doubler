@@ -42,6 +42,10 @@ void main() {
       Directionality.of(tester.element(find.byType(Scaffold).first)),
       TextDirection.ltr,
     );
+
+    // Let SplashScreen's navigation timer fire so no timer outlives the tree.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
   });
 
   test('language route constant exists', () {

@@ -93,7 +93,23 @@ jobs:
         run: flutter pub get
 
       - name: Static analysis
-        run: flutter analyze --fatal-infos --fatal-warnings
+        id: analyze
+        run: |
+          set -o pipefail
+          flutter analyze --fatal-infos --fatal-warnings 2>&1 | tee analyze.txt
+
+      # Mirror findings into the job summary so they are readable without
+      # downloading raw logs (which require extra permissions/tooling).
+      - name: Publish analyzer findings
+        if: ${{ always() && steps.analyze.outcome == 'failure' }}
+        run: |
+          {
+            echo "### \`flutter analyze --fatal-infos --fatal-warnings\` findings"
+            echo
+            echo '```'
+            cat analyze.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run tests
         run: flutter test

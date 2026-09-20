@@ -5,7 +5,6 @@ import 'package:doubler/features/api_key/application/api_key_controller.dart';
 import 'package:doubler/features/dubbing/application/dubbing_controller.dart';
 import 'package:doubler/infrastructure/audio/audio_capture.dart';
 import 'package:doubler/infrastructure/gemini/gemini_socket.dart';
-import 'package:doubler/infrastructure/gemini/gemini_translation_provider.dart';
 import 'package:doubler/infrastructure/storage/secure_key_store.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

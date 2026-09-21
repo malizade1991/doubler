@@ -263,16 +263,41 @@ jobs:
           chmod 600 android/app/release-keystore.jks android/key.properties
 
       - name: Build release APKs (split per ABI)
+        id: apk
         run: |
+          set -o pipefail
           flutter build apk --release --split-per-abi \
             --build-name="${{ steps.ver.outputs.name }}" \
-            --build-number="${{ steps.ver.outputs.number }}"
+            --build-number="${{ steps.ver.outputs.number }}" 2>&1 | tee build.txt
 
       - name: Build Android App Bundle
+        id: aab
         run: |
+          set -o pipefail
           flutter build appbundle --release \
             --build-name="${{ steps.ver.outputs.name }}" \
-            --build-number="${{ steps.ver.outputs.number }}"
+            --build-number="${{ steps.ver.outputs.number }}" 2>&1 | tee -a build.txt
+
+      # Gradle/AAPT/lint failures are otherwise only in the raw log, which needs
+      # extra permissions to fetch; mirror the interesting lines as annotations so
+      # `gh api .../check-runs/<id>/annotations` explains a red build.
+      - name: Publish build failure
+        if: ${{ always() && (steps.apk.outcome == 'failure' || steps.aab.outcome == 'failure') }}
+        run: |
+          [ -f build.txt ] || : > build.txt
+          {
+            echo "### Android build failure"
+            echo
+            echo '```'
+            grep -E '^(FAILURE|\* What went wrong|> Task|e: |Error: |W: |.*error:|Execution failed|\[LINT\])' build.txt | head -60 || tail -60 build.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            grep -E '^(FAILURE|e: |Error: |\* What went wrong|Execution failed|> Task .*FAILED)' build.txt \
+              | sed -n '1,8p'
+          } | while IFS= read -r line; do
+            printf '::error title=android build::%s\n' "${line//%/%25}"
+          done
 
       - name: Verify produced artifacts (fail loudly on path mismatch)
         run: |

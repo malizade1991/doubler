@@ -437,12 +437,29 @@ jobs:
           } >> release-notes.md
           cat release-notes.md
 
-      - name: Create GitHub Release
+      # Created as a draft on purpose: on a repository with immutable releases
+      # GitHub rejects asset uploads once a release is published, and a draft
+      # also means a half-uploaded release is never visible.
+      - name: Create GitHub Release (draft)
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ steps.shape.outputs.title }}
-          draft: false
+          draft: true
           prerelease: ${{ steps.shape.outputs.prerelease == 'true' }}
           body_path: release-notes.md
           files: release-assets/*
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.shape.outputs.prerelease }}" = "true" ]; then
+            gh release edit "${{ github.ref_name }}" --draft=false --prerelease
+          else
+            gh release edit "${{ github.ref_name }}" --draft=false --prerelease=false
+          fi
+          gh release view "${{ github.ref_name }}" \
+            --json tagName,isDraft,isPrerelease,assets \
+            --jq '{tagName, isDraft, isPrerelease, assets: [.assets[].name]}'

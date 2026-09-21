@@ -124,6 +124,10 @@ class DubbingController extends Notifier<DubbingUiState> {
     state = const DubbingUiState(phase: DubbingPhase.connecting);
     _sessionStarted = DateTime.now();
     ref.read(transcriptControllerProvider.notifier).startSession();
+    // Start capturing now, not after the handshake: the first words a user
+    // speaks must not be lost because the socket was still opening. The
+    // provider drops frames until `setupComplete` instead of erroring.
+    await _startMic();
     final engine = ref.read(translationProviderFactory);
     final source = ref.read(sourceLanguageCodeProvider);
     final target = ref.read(targetLanguageCodeProvider);
@@ -135,6 +139,7 @@ class DubbingController extends Notifier<DubbingUiState> {
             targetLanguage: target,
             tone: tone.id,
             voiceId: ref.read(voiceIdProvider),
+            model: ref.read(geminiModelProvider),
             apiKey: key,
           ),
         )
@@ -158,7 +163,6 @@ class DubbingController extends Notifier<DubbingUiState> {
       case ProviderConnected():
         state = state.copyWith(phase: DubbingPhase.live, capturing: true);
         unawaited(ref.read(audioOutputProvider).start());
-        unawaited(_startMic());
       case ProviderError(:final code):
         unawaited(ref.read(audioCaptureProvider).pause());
         unawaited(ref.read(audioOutputProvider).pause());

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/models/performance_mode.dart';
 import '../../domain/models/subtitle_style.dart';
 import '../../domain/models/translation_tone.dart';
+import '../../infrastructure/gemini/gemini_config.dart';
 
 final localeProvider = NotifierProvider<LocaleController, Locale>(
   LocaleController.new,
@@ -30,9 +31,14 @@ final smartDuckingProvider = StateProvider<bool>((ref) => true);
 
 final themeModeProvider = StateProvider<ThemeMode>((ref) => ThemeMode.system);
 
-final voiceIdProvider = StateProvider<String>((ref) => 'Kore');
+final voiceIdProvider = StateProvider<String>((ref) => GeminiConfig.defaultVoice);
+
+/// Live API model id used for new sessions. Kept in settings because Google
+/// renames these; see GEMINI_INTEGRATION.md → "Models".
+final geminiModelProvider =
+    StateProvider<String>((ref) => GeminiConfig.liveModel);
 
 final performanceModeProvider =
     StateProvider<PerformanceMode>((ref) => PerformanceMode.balanced);
 
-const geminiVoices = <String>['Kore', 'Puck', 'Charon', 'Fenrir', 'Aoede'];
+const List<String> geminiVoices = GeminiConfig.voices;

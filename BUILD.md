@@ -13,11 +13,17 @@ This sandbox could not download the Dart SDK (`storage.googleapis.com`). Build o
 ```
 flutter pub get
 flutter test
-flutter analyze
+flutter analyze --fatal-infos --fatal-warnings   # CI runs exactly this
 flutter build apk --release
 flutter build appbundle --release
 flutter build ios --release   # macOS
 ```
+
+`analysis_options.yaml` enables `prefer_const_constructors`, `prefer_const_declarations`,
+`prefer_const_literals_to_create_immutables`, `unawaited_futures` and `avoid_print` on top of
+`flutter_lints`; `--fatal-infos` turns every info into a build failure, so: put `const` on
+literal-only widget trees, never re-declare `const` inside an existing const context, and
+`await` or `unawaited()` every `Future` inside an async body.
 
 ## Permissions
 
@@ -52,9 +58,11 @@ paths, downloads) is in [docs/CI.md](docs/CI.md).
 
 ## Release checklist
 
-- [ ] `flutter test` / `flutter analyze` clean
+- [ ] `flutter test` / `flutter analyze --fatal-infos --fatal-warnings` clean
 - [ ] No real keys in git
 - [ ] Privacy copy matches PRIVACY.md
 - [ ] Mic permission strings localized
 - [ ] Store listing from `docs/STORE.md`
-- [ ] Manual: real Gemini key, headphones, Persian↔English
+- [ ] Manual: real Gemini key (`AQ.…` auth key), headphones, Persian↔English
+- [ ] Manual: paste the key with quotes and a `key=` label around it — it must still save
+- [ ] Manual: kill the network, press start — the app must say *network*, not *invalid key*

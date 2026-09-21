@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:doubler/domain/providers/translation_provider.dart';
 import 'package:doubler/infrastructure/gemini/gemini_config.dart';
@@ -13,6 +14,12 @@ void main() {
     expect(GeminiConfig.redactedUri(), isNot(contains('AIza')));
     expect(GeminiConfig.liveUri('SECRETKEY').toString(), contains('SECRETKEY'));
     expect(GeminiConfig.redactedUri(), isNot(contains('SECRETKEY')));
+  });
+
+  test('the socket carries the key in the header as well as the query', () {
+    final uri = GeminiConfig.liveUri('SECRETKEY');
+    expect(uri.queryParameters['key'], 'SECRETKEY');
+    expect(GeminiConfig.authHeaders('SECRETKEY')['x-goog-api-key'], 'SECRETKEY');
   });
 
   test('error mapper', () {
@@ -32,8 +39,13 @@ void main() {
   test('provider sends setup and maps audio/transcript events', () async {
     final fake = FakeGeminiSocket();
     final provider = GeminiTranslationProvider(
-      socketFactory: (uri) async {
-        expect(uri.queryParameters['key'], 'test-key-value-123456');
+      socketFactory: (endpoint) async {
+        expect(endpoint.uri.queryParameters['key'], 'test-key-value-123456');
+        expect(
+          endpoint.headers['x-goog-api-key'],
+          'test-key-value-123456',
+        );
+        expect(endpoint.uri.path, contains('BidiGenerateContent'));
         return fake;
       },
       maxReconnects: 0,
@@ -51,10 +63,25 @@ void main() {
         .listen(events.add);
 
     await Future<void>.delayed(Duration.zero);
-    expect(events.whereType<ProviderConnected>(), isNotEmpty);
     expect(fake.sent, isNotEmpty);
     expect(fake.sent.first, contains('setup'));
     expect(fake.sent.first, isNot(contains('test-key-value-123456')));
+    expect(fake.sent.first, contains('models/gemini-3.8-live'));
+    // Nothing is "connected" until the server confirms the handshake.
+    expect(events.whereType<ProviderConnected>(), isEmpty);
+
+    // Audio produced during the handshake is dropped, never queued forever.
+    final sentBefore = fake.sent.length;
+    provider.sendAudio(Uint8List.fromList([1, 2, 3, 4]));
+    expect(fake.sent, hasLength(sentBefore));
+
+    fake.emit(jsonEncode({'setupComplete': true}));
+    await Future<void>.delayed(Duration.zero);
+    expect(events.whereType<ProviderConnected>(), isNotEmpty);
+
+    provider.sendAudio(Uint8List.fromList([1, 2, 3, 4]));
+    expect(fake.sent.last, contains('realtime_input'));
+    expect(fake.sent.last, contains('audio/pcm;rate=16000'));
 
     fake.emit(
       jsonEncode({
@@ -88,6 +115,20 @@ void main() {
       'keyInvalid',
     );
 
+    await provider.disconnect();
+  });
+
+  test('a socket that dies with no key says keyMissing, not unavailable', () async {
+    final provider = GeminiTranslationProvider(
+      socketFactory: (endpoint) async => FakeGeminiSocket(),
+      maxReconnects: 0,
+    );
+    final events = <ProviderEvent>[];
+    provider
+        .connect(const SessionConfig(sourceLanguage: 'en-US', targetLanguage: 'fa-IR'))
+        .listen(events.add);
+    await Future<void>.delayed(Duration.zero);
+    expect(events.whereType<ProviderError>().last.code, 'keyMissing');
     await provider.disconnect();
   });
 }

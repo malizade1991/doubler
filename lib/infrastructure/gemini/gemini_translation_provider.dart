@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../core/errors/app_failure.dart';
 import '../../domain/providers/translation_provider.dart';
 import 'gemini_config.dart';
 import 'gemini_error_mapper.dart';
@@ -34,20 +35,35 @@ class GeminiTranslationProvider implements TranslationProvider {
     return _events.stream;
   }
 
+  bool _setupComplete = false;
+
   Future<void> _open() async {
     final config = _config;
     final key = config?.apiKey;
     if (config == null || key == null || key.isEmpty) {
-      _events.add(const ProviderError('keyMissing'));
+      // Deferred by one microtask on purpose: `connect()` hands the caller the
+      // stream and only then subscribes, and a broadcast stream drops events
+      // emitted while nobody is listening yet.
+      unawaited(
+        Future<void>.microtask(
+          () => _events.add(const ProviderError('keyMissing')),
+        ),
+      );
       return;
     }
+    _setupComplete = false;
     try {
-      final socket = await _socketFactory(GeminiConfig.liveUri(key));
+      final socket = await _socketFactory(
+        GeminiLiveEndpoint(
+          uri: GeminiConfig.liveUri(key),
+          headers: GeminiConfig.authHeaders(key),
+        ),
+      );
       _socket = socket;
       _sub = socket.messages.listen(
         _onMessage,
-        onError: (_) {
-          _events.add(const ProviderError('geminiUnavailable'));
+        onError: (Object error) {
+          _events.add(ProviderError(_codeFor(error)));
           unawaited(_maybeReconnect());
         },
         onDone: () {
@@ -59,16 +75,23 @@ class GeminiTranslationProvider implements TranslationProvider {
         },
       );
       socket.add(_setupJson(config));
-      _events.add(const ProviderConnected());
-    } on Object {
-      _events.add(const ProviderError('geminiUnavailable'));
+    } on Object catch (error) {
+      _events.add(ProviderError(_codeFor(error)));
       await _maybeReconnect();
     }
   }
 
+  /// A key/model problem must not be reported as "Gemini is down".
+  static String _codeFor(Object error) {
+    if (error is AppFailure) {
+      return error.code;
+    }
+    return GeminiErrorMapper.fromCloseCode(null, error.toString());
+  }
+
   String _setupJson(SessionConfig config) {
     final setup = <String, dynamic>{
-      'model': GeminiConfig.liveModel,
+      'model': GeminiConfig.modelResource(config.model),
       'generation_config': {
         'response_modalities': ['AUDIO'],
         'speech_config': {
@@ -87,9 +110,10 @@ class GeminiTranslationProvider implements TranslationProvider {
       'input_audio_transcription': <String, dynamic>{},
       'output_audio_transcription': <String, dynamic>{},
     };
-    if (_resumeHandle != null) {
-      setup['session_resumption'] = {'handle': _resumeHandle};
-    }
+    // Requesting the field (without a handle) makes the server emit
+    // `sessionResumptionUpdate`s, which is what enables resume-after-drop.
+    setup['session_resumption'] =
+        _resumeHandle == null ? <String, dynamic>{} : {'handle': _resumeHandle};
     return jsonEncode({'setup': setup});
   }
 
@@ -101,6 +125,12 @@ class GeminiTranslationProvider implements TranslationProvider {
       map = raw;
     }
     if (map == null) {
+      return;
+    }
+
+    if (map['setupComplete'] == true || map['setup_complete'] == true) {
+      _setupComplete = true;
+      _events.add(const ProviderConnected());
       return;
     }
 
@@ -203,7 +233,9 @@ class GeminiTranslationProvider implements TranslationProvider {
   @override
   void sendAudio(Uint8List pcm16k) {
     final socket = _socket;
-    if (socket == null) {
+    // The protocol requires waiting for `setupComplete` before any other
+    // client message; audio produced earlier is dropped rather than rejected.
+    if (socket == null || !_setupComplete) {
       return;
     }
     socket.add(

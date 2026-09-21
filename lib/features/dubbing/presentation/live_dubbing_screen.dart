@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/l10n/locale_controller.dart';
 import '../../../core/routing/app_routes.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../domain/models/language_catalog.dart';
 import '../../../infrastructure/audio/audio_lifecycle.dart';
@@ -12,8 +13,9 @@ import '../../../infrastructure/audio/audio_output.dart';
 import '../../../shared/widgets/audio_waveform.dart';
 import '../../../shared/widgets/doubler_button.dart';
 import '../../../shared/widgets/doubler_card.dart';
+import '../../../shared/widgets/doubler_feedback.dart';
+import '../../../shared/widgets/doubler_scaffold.dart';
 import '../../../shared/widgets/doubler_slider.dart';
-import '../../../shared/widgets/mixed_direction_text.dart';
 import '../../../shared/widgets/subtitle_stage.dart';
 import '../../api_key/application/api_key_controller.dart';
 import '../application/dubbing_controller.dart';
@@ -27,6 +29,7 @@ class LiveDubbingScreen extends ConsumerStatefulWidget {
 
 class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
   AudioLifecycleObserver? _lifecycle;
+  bool _showControls = false;
 
   @override
   void initState() {
@@ -43,113 +46,295 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
     super.dispose();
   }
 
+  Future<void> _toggleSession(DubbingUiState dubbing) async {
+    final controller = ref.read(dubbingControllerProvider.notifier);
+    if (dubbing.phase == DubbingPhase.idle ||
+        dubbing.phase == DubbingPhase.error ||
+        dubbing.phase == DubbingPhase.disconnected) {
+      await controller.start();
+      return;
+    }
+    await controller.stop();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final keyState = ref.watch(apiKeyControllerProvider).valueOrNull;
-    final hasKey = keyState?.hasKey ?? false;
+    final theme = Theme.of(context);
+    final hasKey =
+        ref.watch(apiKeyControllerProvider).valueOrNull?.hasKey ?? false;
     final dubbing = ref.watch(dubbingControllerProvider);
     final source = LanguageCatalog.byCode(ref.watch(sourceLanguageCodeProvider));
     final target = LanguageCatalog.byCode(ref.watch(targetLanguageCodeProvider));
     final subStyle = ref.watch(subtitleStyleProvider);
+    final busy = dubbing.phase == DubbingPhase.connecting;
+    final live = dubbing.phase == DubbingPhase.live;
 
-    return Scaffold(
-      appBar: AppBar(title: Text(l10n.startLiveDubbing)),
-      body: Padding(
-        padding: AppSpacing.page,
-        child: hasKey
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    '${source.flag} ${source.nativeName} → ${target.flag} ${target.nativeName}',
-                    textAlign: TextAlign.center,
+    return DoublerScaffold(
+      title: l10n.startLiveDubbing,
+      actions: [
+        IconButton(
+          tooltip: l10n.audioControls,
+          onPressed: () => context.push(AppRoutes.audioControls),
+          icon: const Icon(Icons.tune),
+        ),
+        IconButton(
+          tooltip: l10n.liveTranscript,
+          onPressed: () => context.push(AppRoutes.liveTranscript),
+          icon: const Icon(Icons.closed_caption_outlined),
+        ),
+      ],
+      body: !hasKey
+          ? DoublerEmptyState(
+              icon: Icons.vpn_key_outlined,
+              title: l10n.liveRequiresKey,
+              message: l10n.byokExplainer,
+              action: DoublerButton(
+                label: l10n.apiKeySetup,
+                icon: Icons.vpn_key_outlined,
+                expanded: false,
+                onPressed: () => context.push(AppRoutes.apiKeySetup),
+              ),
+            )
+          : DoublerPage(
+              children: [
+                _StatusBar(l10n: l10n, dubbing: dubbing),
+                const SizedBox(height: AppSpacing.md),
+                DoublerCard(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm,
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  DoublerCard(child: Text(_statusLabel(l10n, dubbing))),
-                  const SizedBox(height: AppSpacing.sm),
-                  AudioWaveform(
-                    active: dubbing.capturing || dubbing.speaking,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${source.flag} ${source.nativeName}',
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall,
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_forward,
+                        size: 18,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      Expanded(
+                        child: Text(
+                          '${target.flag} ${target.nativeName}',
+                          textAlign: TextAlign.end,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall,
+                        ),
+                      ),
+                    ],
                   ),
-                  if (dubbing.latencyMs != null) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    DoublerCard(
-                      child: Text(
-                        '${l10n.latency}: ${dubbing.latencyMs} ms · ${_bandLabel(l10n, dubbing.latencyMs)}',
+                ),
+                const SizedBox(height: AppSpacing.md),
+                DoublerCard(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              l10n.sourceLanguage,
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                          if (dubbing.capturing)
+                            const DoublerPill(
+                              label: 'MIC',
+                              icon: Icons.mic,
+                              color: AppColors.live,
+                              dense: true,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      Text(
+                        dubbing.line.source.isEmpty ? '—' : dubbing.line.source,
+                        style: theme.textTheme.bodyLarge,
+                        textDirection: TextDirection.ltr,
+                      ),
+                      const Divider(height: AppSpacing.lg),
+                      Text(
+                        l10n.targetLanguage,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xxs),
+                      SizedBox(
+                        height: 132,
+                        child: SubtitleStage(
+                          text: dubbing.line.target,
+                          style: subStyle,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AudioWaveform(active: dubbing.capturing || dubbing.speaking),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  l10n.headphonesNote,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (dubbing.errorCode != null) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  DoublerStatusBanner(
+                    mood: DoublerMood.error,
+                    message: l10n.message(dubbing.errorCode),
+                    action: DoublerButton(
+                      label: l10n.tryAgain,
+                      expanded: false,
+                      variant: DoublerButtonVariant.ghost,
+                      onPressed: () => _toggleSession(dubbing),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.md),
+                _MoreControls(
+                  expanded: _showControls,
+                  onToggle: () => setState(() => _showControls = !_showControls),
+                  label: l10n.mixingControls,
+                  children: [
+                    DoublerSlider(
+                      label: l10n.originalVolume,
+                      icon: Icons.volume_down,
+                      value: ref.watch(originalVolumeProvider),
+                      onChanged: (v) =>
+                          ref.read(originalVolumeProvider.notifier).state = v,
+                    ),
+                    DoublerSlider(
+                      label: l10n.dubbedVolume,
+                      icon: Icons.record_voice_over_outlined,
+                      value: ref.watch(dubbedVolumeProvider),
+                      onChanged: (v) =>
+                          ref.read(dubbedVolumeProvider.notifier).state = v,
+                    ),
+                    Text(
+                      l10n.micModeMixNote,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
-                  const SizedBox(height: AppSpacing.sm),
-                  DoublerCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text(l10n.sourceLanguage,
-                            style: Theme.of(context).textTheme.labelMedium),
-                        MixedDirectionText(
-                          text: dubbing.line.source.isEmpty
-                              ? '—'
-                              : dubbing.line.source,
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        Text(l10n.targetLanguage,
-                            style: Theme.of(context).textTheme.labelMedium),
-                        const SizedBox(height: AppSpacing.xs),
-                        SizedBox(
-                          height: 96,
-                          child: SubtitleStage(
-                            text: dubbing.line.target,
-                            style: subStyle,
-                          ),
-                        ),
-                      ],
+                ),
+              ],
+            ),
+      bottomBar: hasKey
+          ? DoublerActionRow(
+              children: [
+                Row(
+                  children: [
+                    DoublerIconButton(
+                      icon: dubbing.capturing
+                          ? Icons.mic_off
+                          : Icons.mic_none,
+                      tooltip: dubbing.capturing ? l10n.muteMic : l10n.unmuteMic,
+                      selected: !dubbing.capturing && live,
+                      onPressed: live
+                          ? () {
+                              if (dubbing.capturing) {
+                                ref
+                                    .read(dubbingControllerProvider.notifier)
+                                    .pauseCapture();
+                              } else {
+                                ref
+                                    .read(dubbingControllerProvider.notifier)
+                                    .resumeCapture();
+                              }
+                            }
+                          : null,
                     ),
-                  ),
-                  DoublerSlider(
-                    label: l10n.originalVolume,
-                    value: ref.watch(originalVolumeProvider),
-                    onChanged: (v) =>
-                        ref.read(originalVolumeProvider.notifier).state = v,
-                  ),
-                  DoublerSlider(
-                    label: l10n.dubbedVolume,
-                    value: ref.watch(dubbedVolumeProvider),
-                    onChanged: (v) =>
-                        ref.read(dubbedVolumeProvider.notifier).state = v,
-                  ),
-                  const Spacer(),
-                  DoublerButton(
-                    label: l10n.liveTranscript,
-                    variant: DoublerButtonVariant.ghost,
-                    onPressed: () => context.push(AppRoutes.liveTranscript),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  DoublerButton(
-                    label: l10n.startSession,
-                    onPressed: dubbing.phase == DubbingPhase.connecting
-                        ? null
-                        : () =>
-                            ref.read(dubbingControllerProvider.notifier).start(),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  DoublerButton(
-                    label: l10n.stopSession,
-                    variant: DoublerButtonVariant.secondary,
-                    onPressed: () =>
-                        ref.read(dubbingControllerProvider.notifier).stop(),
-                  ),
-                ],
-              )
-            : Column(
-                children: [
-                  DoublerCard(child: Text(l10n.liveRequiresKey)),
-                  const SizedBox(height: AppSpacing.md),
-                  DoublerButton(
-                    label: l10n.apiKeySetup,
-                    onPressed: () => context.push(AppRoutes.apiKeySetup),
-                  ),
-                ],
-              ),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: DoublerButton(
+                        label: busy
+                            ? l10n.connecting
+                            : live
+                                ? l10n.stopSession
+                                : l10n.startSession,
+                        icon: busy
+                            ? null
+                            : live
+                                ? Icons.stop_rounded
+                                : Icons.play_arrow_rounded,
+                        busy: busy,
+                        variant: live
+                            ? DoublerButtonVariant.destructive
+                            : DoublerButtonVariant.primary,
+                        onPressed: () => _toggleSession(dubbing),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          : null,
+    );
+  }
+}
+
+class _StatusBar extends StatelessWidget {
+  const _StatusBar({required this.l10n, required this.dubbing});
+
+  final AppLocalizations l10n;
+  final DubbingUiState dubbing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final live = dubbing.phase == DubbingPhase.live && dubbing.capturing;
+    return DoublerCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: dubbing.errorCode != null
+                  ? AppColors.danger
+                  : live
+                      ? AppColors.live
+                      : theme.colorScheme.outline,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              _statusLabel(l10n, dubbing),
+              style: theme.textTheme.titleSmall,
+            ),
+          ),
+          if (dubbing.latencyMs != null)
+            DoublerPill(
+              label: '${l10n.latency} ${dubbing.latencyMs} ms · ${_bandLabel(l10n, dubbing.latencyMs)}',
+              icon: Icons.speed,
+              dense: true,
+              color: switch (latencyBand(dubbing.latencyMs)) {
+                LatencyBand.good => AppColors.success,
+                LatencyBand.fair => AppColors.warning,
+                LatencyBand.poor => AppColors.danger,
+              },
+            ),
+        ],
       ),
     );
   }
@@ -176,11 +361,57 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
       return l10n.listening;
     }
     return switch (dubbing.phase) {
-      DubbingPhase.idle => l10n.shellPlaceholder,
+      DubbingPhase.idle => l10n.sessionIdle,
       DubbingPhase.connecting => l10n.connecting,
       DubbingPhase.live => l10n.live,
       DubbingPhase.error => l10n.message(dubbing.errorCode),
       DubbingPhase.disconnected => l10n.disconnected,
     };
+  }
+}
+
+class _MoreControls extends StatelessWidget {
+  const _MoreControls({
+    required this.expanded,
+    required this.onToggle,
+    required this.label,
+    required this.children,
+  });
+
+  final bool expanded;
+  final VoidCallback onToggle;
+  final String label;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return DoublerCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: onToggle,
+            child: Row(
+              children: [
+                Icon(
+                  expanded ? Icons.expand_less : Icons.expand_more,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(child: Text(label, style: Theme.of(context).textTheme.titleSmall)),
+              ],
+            ),
+          ),
+          if (expanded) ...[
+            const SizedBox(height: AppSpacing.sm),
+            ...children,
+          ],
+        ],
+      ),
+    );
   }
 }

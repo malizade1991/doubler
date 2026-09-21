@@ -151,11 +151,32 @@ jobs:
         env:
           TEST_ANNOTATE: |
             lines = open('test.txt', errors='replace').read().splitlines()
+            # 1) name every failing test: "[E]" lines carry file + test name, and
+            #    plain expect() failures print no banner, so this is the only
+            #    reliable way to learn which tests broke from the checks API.
+            seen = set()
+            for line in lines:
+                if '[E]' not in line:
+                    continue
+                name = line.split(':', 2)[-1].replace('[E]', '').strip().lstrip(': ')
+                if name and name not in seen:
+                    seen.add(name)
+                    print('::error title=failing test::' + name.replace('%', '%25')[:400])
+            # 2) then the exception text itself (up to the annotation cap).
             idx = [i for i, l in enumerate(lines) if 'EXCEPTION CAUGHT' in l]
-            for i in idx[:20]:
+            budget = max(0, 9 - len(seen))
+            for i in idx[:budget]:
                 block = [x.strip() for x in lines[i:i + 30] if x.strip()]
                 msg = ' | '.join(block)[:1200]
                 print('::error title=flutter test::' + msg.replace('%', '%25'))
+            # 3) plain expect() failures have no banner: quote the few lines the
+            #    reporter printed after the [E] marker instead of hiding them.
+            if not idx and budget:
+                for i, line in enumerate(lines):
+                    if '[E]' not in line or len(idx) >= budget:
+                        continue
+                    block = [x.strip() for x in lines[i:i + 8] if x.strip()]
+                    print('::error title=test failure detail::' + ' | '.join(block)[:900].replace('%', '%25'))
 
   build:
     name: Build Android artifacts
@@ -242,16 +263,41 @@ jobs:
           chmod 600 android/app/release-keystore.jks android/key.properties
 
       - name: Build release APKs (split per ABI)
+        id: apk
         run: |
+          set -o pipefail
           flutter build apk --release --split-per-abi \
             --build-name="${{ steps.ver.outputs.name }}" \
-            --build-number="${{ steps.ver.outputs.number }}"
+            --build-number="${{ steps.ver.outputs.number }}" 2>&1 | tee build.txt
 
       - name: Build Android App Bundle
+        id: aab
         run: |
+          set -o pipefail
           flutter build appbundle --release \
             --build-name="${{ steps.ver.outputs.name }}" \
-            --build-number="${{ steps.ver.outputs.number }}"
+            --build-number="${{ steps.ver.outputs.number }}" 2>&1 | tee -a build.txt
+
+      # Gradle/AAPT/lint failures are otherwise only in the raw log, which needs
+      # extra permissions to fetch; mirror the interesting lines as annotations so
+      # `gh api .../check-runs/<id>/annotations` explains a red build.
+      - name: Publish build failure
+        if: ${{ always() && (steps.apk.outcome == 'failure' || steps.aab.outcome == 'failure') }}
+        run: |
+          [ -f build.txt ] || : > build.txt
+          {
+            echo "### Android build failure"
+            echo
+            echo '```'
+            grep -E '^(FAILURE|\* What went wrong|> Task|e: |Error: |W: |.*error:|Execution failed|\[LINT\])' build.txt | head -60 || tail -60 build.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          {
+            grep -E '^(FAILURE|e: |Error: |\* What went wrong|Execution failed|> Task .*FAILED)' build.txt \
+              | sed -n '1,8p'
+          } | while IFS= read -r line; do
+            printf '::error title=android build::%s\n' "${line//%/%25}"
+          done
 
       - name: Verify produced artifacts (fail loudly on path mismatch)
         run: |

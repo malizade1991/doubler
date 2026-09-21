@@ -4,7 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/doubler_bindings.dart';
+
 void main() {
+  setUp(() => mockDoublerStoreChannel());
+
   testWidgets('app boots into splash then onboarding without a key', (
     WidgetTester tester,
   ) async {

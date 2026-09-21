@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.2
+
+### Notes
+
+- **Rebuild of the already-verified 0.2.1 tree.** The four `flutter analyze` findings reported
+  against the earlier tree were fixed in the 0.2.0 / 0.2.1 work and are not present on `main`:
+  `IoGeminiSocket` defines the `_redact` sanitizer it calls, `FakeGeminiSocket` implements
+  `closeCode` / `closeReason`, and the dead `_wentLive` field and the redundant
+  `dart:typed_data` import are gone. `flutter analyze --fatal-infos --fatal-warnings` and
+  `flutter test` pass, and this tag is cut from exactly that commit, so the published APKs and
+  AAB come from a green pipeline.
+- Build number `+4`. No user-visible behaviour change versus 0.2.1; the artifact set is the
+  same three split-per-ABI release APKs plus the `.aab`.
+
 ## 0.2.1
 
 ### Fixed

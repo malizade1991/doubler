@@ -1,0 +1,259 @@
+# DOUBLER — verify a *published* release, from the bytes a user downloads.
+#
+# Why this exists: `.github/workflows/android-ci.yml` proves the APK/AAB files were
+# *produced* and *uploaded*. It never proves what a user actually downloads is a
+# valid, installable, correctly-versioned artifact for the tag it is attached to.
+# This workflow downloads the released assets and checks them the way a device
+# would: zip integrity, APK signature (apksigner), package/version/ABI from
+# `aapt dump badging`, and the debug-vs-release certificate against the release's
+# own `prerelease` flag.
+#
+# Triggers:
+#   * `release: published`  -> every published release is verified automatically
+#   * `workflow_dispatch`   -> verify any tag on demand (input `tag`, empty = latest)
+#
+# Read-only: it downloads and inspects, it never edits a release.
+#
+# Pinned third-party actions (immutable commit SHAs; tag noted for readability):
+#   actions/checkout   v7.0.1  3d3c42e5aac5ba805825da76410c181273ba90b1
+#   actions/setup-java v6.0.1  de7274f081f381c8f8158605e0321c36c376e2e6
+
+name: Verify published release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to verify (e.g. v0.2.2). Empty = latest release."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: "17"
+
+jobs:
+  verify:
+    name: Download + inspect the released artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Resolve the tag to verify
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release view --json tagName --jq .tagName)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Verifying release: $TAG"
+
+      - name: Resolve expected version (pubspec = source of truth)
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          case "$TAG" in
+            v*) ;;
+            *) echo "::error::Tag '$TAG' does not start with 'v'; release tags must be vX.Y.Z."; exit 1 ;;
+          esac
+          RAW="$(git show "$TAG:pubspec.yaml" | grep -m1 '^version:' | awk '{print $2}')"
+          NAME="${RAW%%+*}"
+          NUMBER="${RAW##*+}"
+          TAG_BODY="${TAG#v}"
+          TAG_NAME="${TAG_BODY%%+*}"
+          if [ "$TAG_BODY" != "$TAG_NAME" ]; then NUMBER="${TAG_BODY##*+}"; fi
+          if [ "$TAG_NAME" != "$NAME" ]; then
+            echo "::error::Tag v$TAG_NAME does not match pubspec version $NAME on that tag."
+            exit 1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Expected: versionName=$NAME versionCode=$NUMBER (from $TAG)"
+
+      - name: Locate Android build-tools (aapt + apksigner)
+        id: sdk
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          BT=""
+          if [ -d "$SDK/build-tools" ]; then
+            for candidate in $(ls -1 "$SDK/build-tools" | sort -Vr); do
+              if [ -x "$SDK/build-tools/$candidate/aapt" ] && [ -x "$SDK/build-tools/$candidate/apksigner" ]; then
+                BT="$SDK/build-tools/$candidate"; break
+              fi
+            done
+          fi
+          if [ -z "$BT" ]; then
+            echo "::error::No Android build-tools with aapt+apksigner under $SDK/build-tools. Install build-tools on the runner."
+            exit 1
+          fi
+          echo "build_tools=$BT" >> "$GITHUB_OUTPUT"
+          "$BT/aapt" version
+          echo "Using $BT"
+
+      - name: Download the published assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${{ steps.tag.outputs.tag }}" --dir dist
+          ls -l dist
+          echo "--- release metadata ---"
+          gh release view "${{ steps.tag.outputs.tag }}" \
+            --json tagName,isDraft,isPrerelease,assets \
+            --jq '{tagName, isDraft, isPrerelease, assets: [.assets[] | {name, size, state}]}'
+
+      - name: Verify the release metadata and asset set
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          META="$(gh release view "$TAG" --json isDraft,isPrerelease)"
+          DRAFT="$(printf '%s' "$META" | python3 -c 'import json,sys; print(json.load(sys.stdin)["isDraft"])')"
+          PRE="$(printf '%s' "$META" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["isPrerelease"]).lower())')"
+          if [ "$DRAFT" = "True" ]; then
+            echo "::error::Release $TAG is still a draft; it is not public."
+            exit 1
+          fi
+          echo "isPrerelease=$PRE" >> "$GITHUB_ENV"
+
+          missing=0
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            f="dist/doubler-$TAG-$abi.apk"
+            [ -f "$f" ] || { echo "::error::Missing asset doubler-$TAG-$abi.apk"; missing=1; }
+          done
+          [ -f "dist/doubler-$TAG.aab" ] || { echo "::error::Missing asset doubler-$TAG.aab"; missing=1; }
+          extra="$(find dist -type f ! -name "doubler-$TAG-*.apk" ! -name "doubler-$TAG.aab" | wc -l)"
+          if [ "$extra" -ne 0 ]; then
+            echo "::error::Unexpected extra asset(s) in the release:"; find dist -type f ! -name "doubler-$TAG-*.apk" ! -name "doubler-$TAG.aab"
+            missing=1
+          fi
+          [ "$missing" -eq 0 ] || exit 1
+          echo "Asset set complete: 3 split-per-ABI APKs + 1 AAB."
+
+      - name: Verify each APK (integrity, signature, version, ABI)
+        id: apks
+        run: |
+          set -euo pipefail
+          BT="${{ steps.sdk.outputs.build_tools }}"
+          TAG="${{ steps.tag.outputs.tag }}"
+          EXPECT_NAME="${{ steps.ver.outputs.name }}"
+          EXPECT_CODE="${{ steps.ver.outputs.number }}"
+          fail=0
+          {
+            echo "### APK verification — \`$TAG\`"
+            echo
+            echo "| APK | ABI | versionName | versionCode | signature | minSdk | targetSdk |"
+            echo "| --- | --- | --- | --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            apk="dist/doubler-$TAG-$abi.apk"
+            echo "=== $apk ==="
+
+            # 1) Container integrity — a truncated/mangled upload fails here.
+            if ! unzip -t "$apk" >/dev/null; then
+              echo "::error file=$apk::APK is not a valid zip archive."
+              fail=1; continue
+            fi
+
+            # 2) Signature — an unsigned APK cannot be installed at all.
+            if ! "$BT/apksigner" verify --print-certs "$apk" > apksigner.txt 2>&1; then
+              echo "::error file=$apk::apksigner verify FAILED — the APK is not installable."
+              cat apksigner.txt
+              fail=1; continue
+            fi
+            cert_dn="$(sed -n 's/^Signer #1 certificate DN: //p' apksigner.txt | head -1)"
+            echo "cert DN: $cert_dn"
+
+            # 3) Metadata as a device/Play would read it.
+            "$BT/aapt" dump badging "$apk" > badging.txt
+            vname="$(sed -n "s/^package:.* versionName='\([^']*\)'.*/\1/p" badging.txt | head -1)"
+            vcode="$(sed -n "s/^package:.* versionCode='\([^']*\)'.*/\1/p" badging.txt | head -1)"
+            pkg="$(sed -n "s/^package: name='\([^']*\)'.*/\1/p" badging.txt | head -1)"
+            native="$(sed -n "s/^native-code: //p" badging.txt | head -1)"
+            minsdk="$(sed -n "s/^sdkVersion:'\([^']*\)'.*/\1/p" badging.txt | head -1)"
+            targetsdk="$(sed -n "s/^targetSdkVersion:'\([^']*\)'.*/\1/p" badging.txt | head -1)"
+            echo "package=$pkg versionName=$vname versionCode=$vcode native-code=$native minSdk=$minsdk targetSdk=$targetsdk"
+
+            [ "$pkg" = "com.doubler.doubler" ] || { echo "::error file=$apk::Unexpected package '$pkg'."; fail=1; }
+            [ "$vname" = "$EXPECT_NAME" ] || { echo "::error file=$apk::versionName '$vname' != expected '$EXPECT_NAME' for $TAG."; fail=1; }
+            [ "$vcode" = "$EXPECT_CODE" ] || { echo "::error file=$apk::versionCode '$vcode' != expected '$EXPECT_CODE' for $TAG."; fail=1; }
+            printf '%s' "$native" | grep -q "$abi" || { echo "::error file=$apk::native-code '$native' does not match file ABI '$abi'."; fail=1; }
+
+            # 4) The Flutter engine + AOT payload must be in the APK for that ABI.
+            for entry in "lib/$abi/libflutter.so" "lib/$abi/libapp.so" "classes.dex" "AndroidManifest.xml"; do
+              unzip -l "$apk" "$entry" >/dev/null 2>&1 || { echo "::error file=$apk::Missing entry $entry."; fail=1; }
+            done
+
+            # 5) Debug-signed is fine for a QA pre-release and never for a real one.
+            case "$cert_dn" in
+              *"Android Debug"*)
+                if [ "${isPrerelease:-false}" != "true" ]; then
+                  echo "::error file=$apk::Release is published as a NORMAL release but the APK is debug-signed."
+                  fail=1
+                fi
+                sig="debug keystore (QA)"
+                ;;
+              *)
+                if [ "${isPrerelease:-false}" = "true" ]; then
+                  echo "::warning file=$apk::Published as a pre-release, yet signed with '$cert_dn'."
+                fi
+                sig="release keystore"
+                ;;
+            esac
+
+            echo "| \`$(basename "$apk")\` | $abi | $vname | $vcode | $sig | $minsdk | $targetsdk |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          [ "$fail" -eq 0 ] || exit 1
+          echo "All three split-per-ABI APKs verify."
+
+      - name: Verify the App Bundle (Google Play upload shape)
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          aab="dist/doubler-$TAG.aab"
+          unzip -t "$aab" >/dev/null
+          for entry in "base/manifest/AndroidManifest.xml" "BundleConfig.pb" "base/dex/classes.dex" "base/resources.pb"; do
+            unzip -l "$aab" "$entry" >/dev/null 2>&1 || { echo "::error file=$aab::Missing bundle entry $entry."; exit 1; }
+          done
+          size="$(stat -c %s "$aab")"
+          echo "AAB is a valid bundle ($size bytes) with a base module manifest, dex and resources."
+          {
+            echo
+            echo "App Bundle \`$(basename "$aab")\`: valid bundle, base module present, ${size} bytes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verdict
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          {
+            echo
+            echo "**Verdict:** \`$TAG\` is published, not a draft, carries the full asset set, and every"
+            echo "artifact is a valid, signed, correctly-versioned build for its ABI."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Verified release $TAG."

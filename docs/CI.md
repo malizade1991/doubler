@@ -141,6 +141,31 @@ silently upload an empty artifact.
   humans: `doubler-vX.Y.Z-arm64-v8a.apk` (most phones), `…-armeabi-v7a.apk`, `…-x86_64.apk`,
   and `doubler-vX.Y.Z.aab` for Play. Or via CLI: `gh release download vX.Y.Z`.
 
+## Verifying a published release (`verify-release.yml`)
+
+`android-ci.yml` proves the APKs/AAB were **built and uploaded**. It does not prove that what a
+downloader gets is a valid, installable, correctly-versioned artifact *for that tag*. That is
+[`verify-release.yml`](../.github/workflows/verify-release.yml), a read-only workflow
+(`contents: read`) that downloads the published assets and checks:
+
+| Check | Tool | Fails when |
+|-------|------|-----------|
+| asset set complete, no strays, not a draft | `gh release view` | an APK/AAB for the tag is missing or the release never left draft |
+| container integrity | `unzip -t` | a truncated/mangled upload |
+| installable signature | `apksigner verify --print-certs` | unsigned, or the cert contradicts the release's `prerelease` flag (debug keystore on a **normal** release) |
+| `versionName` / `versionCode` match the tag + `pubspec.yaml` at that tag | `aapt dump badging` | a mis-stamped build going public |
+| each `-<abi>.apk` really declares that `native-code` and ships `lib/<abi>/libflutter.so`, `lib/<abi>/libapp.so` | `aapt` + `unzip` | an ABI mix-up |
+| AAB has `base/manifest/AndroidManifest.xml`, `BundleConfig.pb`, dex, `resources.pb` | `unzip` | a broken bundle for Play |
+
+It triggers on every `release: published` (so `vX.Y.Z` is verified automatically) and on demand:
+
+```bash
+gh workflow run verify-release.yml -f tag=vX.Y.Z   # empty tag = latest release
+```
+
+A red run means the published release is wrong — fix it before anyone hands the APK out. It only
+reads; it never edits or deletes a release.
+
 ## Remaining manual steps
 
 1. Add the four signing secrets (above) to turn the current unsigned pre-release into a

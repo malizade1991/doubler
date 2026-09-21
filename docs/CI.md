@@ -153,18 +153,31 @@ downloader gets is a valid, installable, correctly-versioned artifact *for that 
 | asset set complete, no strays, not a draft | `gh release view` | an APK/AAB for the tag is missing or the release never left draft |
 | container integrity | `unzip -t` | a truncated/mangled upload |
 | installable signature | `apksigner verify --print-certs` | unsigned, or the cert contradicts the release's `prerelease` flag (debug keystore on a **normal** release) |
-| `versionName` / `versionCode` match the tag + `pubspec.yaml` at that tag | `aapt dump badging` | a mis-stamped build going public |
+| `versionName` matches the tag + `pubspec.yaml` at that tag, and `versionCode` is the build number plus a **positive 1000-multiple, per-ABI offset** | `aapt dump badging` | a mis-stamped build going public, or two splits sharing a version code (Play cannot route per device) |
 | each `-<abi>.apk` really declares that `native-code` and ships `lib/<abi>/libflutter.so`, `lib/<abi>/libapp.so` | `aapt` + `unzip` | an ABI mix-up |
 | AAB has `base/manifest/AndroidManifest.xml`, `BundleConfig.pb`, dex, `resources.pb` | `unzip` | a broken bundle for Play |
 
-It triggers on every `release: published` (so `vX.Y.Z` is verified automatically) and on demand:
+It triggers on every `release: published` (so `vX.Y.Z` is verified automatically), on demand, and
+whenever the verifier itself changes (in the PR that changes it, and again on `main`) — so the
+check is tested against a real release before it is trusted:
 
 ```bash
-gh workflow run verify-release.yml -f tag=vX.Y.Z   # empty tag = latest release
+gh workflow run verify-release.yml -f tag=vX.Y.Z   # empty tag = newest published release
 ```
+
+> Note: the tag resolves to the newest published release when none is given, because `gh release
+> view` only knows a "latest" release once at least one published release is **not** a pre-release.
 
 A red run means the published release is wrong — fix it before anyone hands the APK out. It only
 reads; it never edits or deletes a release.
+
+> **Per-ABI version codes.** `--split-per-abi` overrides `versionCode` with
+> `abiCode * 1000 + buildNumber`; Flutter 3.29.3 uses `armeabi-v7a = 1`, `arm64-v8a = 2`,
+> `x86_64 = 4`, so v0.2.2 (`+4`) ships as **1004 / 2004 / 4004**. The verifier derives the offset
+> rather than pinning those numbers (they are Flutter's to change), and fails if an offset is not
+> a positive 1000-multiple or if two ABIs end up with the same code. Note the consequence: a
+> later *universal* build would carry the raw build number and be rejected as a downgrade by
+> devices that installed a split APK — keep the flag on, or jump the build number.
 
 ## Remaining manual steps
 

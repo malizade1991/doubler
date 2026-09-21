@@ -4,5 +4,5 @@ abstract final class AppConstants {
   static const String brandFa = 'دوبلر';
 
   /// Shown on the About screen. Kept in sync with `pubspec.yaml` — bump both.
-  static const String appVersion = '0.1.0';
+  static const String appVersion = '1.0.0';
 }

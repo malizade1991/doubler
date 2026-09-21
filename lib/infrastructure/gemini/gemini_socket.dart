@@ -149,6 +149,15 @@ class FakeGeminiSocket implements GeminiSocket {
 
   void emitError(Object error) => _controller.addError(error);
 
+  /// Simulates the peer dropping the connection, close frame included, so the
+  /// provider's `onDone` path runs the way a real close runs it — that path
+  /// classifies the failure from [closeCode]/[closeReason], not from a message.
+  void remoteClose({int? code, String? reason}) {
+    closedCode = code;
+    closedReason = reason;
+    unawaited(_controller.close());
+  }
+
   @override
   Stream<dynamic> get messages => _controller.stream;
 

@@ -55,6 +55,13 @@ env:
   FLUTTER_VERSION: "3.29.3"
   # Match android/app/build.gradle (Java 17) and the ubuntu-24.04 default JDK.
   JAVA_VERSION: "17"
+  # When the four ANDROID_* signing secrets are missing on a tag build:
+  #   "false" (default) -> build with the debug keystore and publish the tag as an
+  #                        unsigned PRE-RELEASE, labelled as such, so the tag
+  #                        still produces something downloadable.
+  #   "true"            -> fail the build loudly instead, as the pipeline used to.
+  # See docs/CI.md → "Signing".
+  REQUIRE_SIGNED_RELEASE: "false"
 
 jobs:
   validate:
@@ -183,6 +190,9 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    outputs:
+      # 'true' only when the release keystore secrets were present (tag builds).
+      signed: ${{ steps.signing.outputs.signed }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -226,7 +236,8 @@ jobs:
           echo "is_tag=$IS_TAG" >> "$GITHUB_OUTPUT"
           echo "Resolved version: ${NAME}+${NUMBER} (is_tag=${IS_TAG})"
 
-      - name: Enforce release signing on tag builds
+      - name: Resolve release signing on tag builds
+        id: signing
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -234,17 +245,32 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
           missing=0
           for s in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!s:-}" ]; then echo "::error::Secret $s is not set."; missing=1; fi
+            if [ -z "${!s:-}" ]; then echo "::warning::Secret $s is not set."; missing=1; fi
           done
-          if [ "$missing" = "1" ]; then
-            echo "::error::Release signing is not configured. See docs/CI.md for required secrets."
+          if [ "$missing" = "0" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Release signing: configured."
+            exit 0
+          fi
+          if [ "$REQUIRE_SIGNED_RELEASE" = "true" ]; then
+            echo "::error::Release signing is not configured and REQUIRE_SIGNED_RELEASE=true. See docs/CI.md for the required secrets."
             exit 1
           fi
+          echo "signed=false" >> "$GITHUB_OUTPUT"
+          echo "::warning title=Unsigned release::Release signing is not configured. Building with the debug keystore and publishing this tag as an unsigned PRE-RELEASE. Add the four ANDROID_* secrets (docs/CI.md) and re-run for a signed release."
+          {
+            echo "### ⚠️ Unsigned QA build"
+            echo
+            echo "The four \`ANDROID_*\` signing secrets are not set, so this tag is built"
+            echo "with the Android **debug** keystore and published as a **pre-release**."
+            echo "It installs and runs, but it cannot go to Google Play. See docs/CI.md."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Prepare release signing (tag builds only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Prepare release signing (signed tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v') && steps.signing.outputs.signed == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -347,18 +373,76 @@ jobs:
           name: android-release-${{ github.run_number }}
           path: dist/
 
-      - name: Summarize release assets
+      - name: Rename assets for humans
         run: |
-          echo "Assets to publish:"; find dist -type f -print
+          set -euo pipefail
+          mkdir -p release-assets
+          while IFS= read -r apk; do
+            abi="$(basename "$apk" .apk)"
+            abi="${abi#app-}"
+            abi="${abi%-release}"
+            cp "$apk" "release-assets/doubler-${{ github.ref_name }}-${abi}.apk"
+          done < <(find dist -type f -name '*.apk' | sort)
+          while IFS= read -r aab; do
+            cp "$aab" "release-assets/doubler-${{ github.ref_name }}.aab"
+          done < <(find dist -type f -name '*.aab' | sort)
+          ls -l release-assets
+          test -n "$(ls -A release-assets)"
+
+      - name: Compose release title and notes
+        id: shape
+        env:
+          SIGNED: ${{ needs.build.outputs.signed }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          if [ "$SIGNED" = "true" ]; then
+            {
+              echo "Release build of DOUBLER \`$VERSION\` (\`${{ github.sha }}\`), signed with the"
+              echo "Android release keystore."
+            } > release-notes.md
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=DOUBLER $VERSION" >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "## ⚠️ Unsigned QA build"
+              echo
+              echo "Release signing secrets are **not configured** for this repository, so these"
+              echo "artifacts are signed with the Android **debug** keystore. They install and run"
+              echo "for testing, but they cannot be uploaded to Google Play and must not be"
+              echo "distributed as a production build."
+              echo
+              echo "Add the four \`ANDROID_*\` signing secrets ([docs/CI.md](https://github.com/${{ github.repository }}/blob/main/docs/CI.md))"
+              echo "and re-run this tag to get a signed release."
+            } > release-notes.md
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=DOUBLER $VERSION (unsigned QA build)" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo
+            echo "### Install"
+            echo
+            echo "| Device | File |"
+            echo "| --- | --- |"
+            echo "| Most phones (arm64-v8a) | \`doubler-$VERSION-arm64-v8a.apk\` |"
+            echo "| Older 32-bit phones | \`doubler-$VERSION-armeabi-v7a.apk\` |"
+            echo "| Emulators / x86_64 | \`doubler-$VERSION-x86_64.apk\` |"
+            echo "| Google Play upload | \`doubler-$VERSION.aab\` |"
+            echo
+            echo "DOUBLER translates YouTube — or any other app's — audio on the device, with"
+            echo "your own Gemini API key. Nothing is sent to a DOUBLER server, because there"
+            echo "is none."
+            echo
+            echo "What changed: [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)."
+          } >> release-notes.md
+          cat release-notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
-          name: DOUBLER ${{ github.ref_name }}
+          name: ${{ steps.shape.outputs.title }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
-          files: |
-            dist/**/*.apk
-            dist/**/*.aab
+          prerelease: ${{ steps.shape.outputs.prerelease == 'true' }}
+          body_path: release-notes.md
+          files: release-assets/*

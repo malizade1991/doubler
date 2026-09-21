@@ -255,6 +255,33 @@ void main() {
     expect(IoGeminiSocket.classifyError('HTTP 429'), 'quotaExceeded');
   });
 
+  test('a peer close is classified from its code, not from silence', () async {
+    final fake = FakeGeminiSocket();
+    final provider = GeminiTranslationProvider(
+      socketFactory: (_) async => fake,
+      maxReconnects: 0,
+    );
+    final events = <ProviderEvent>[];
+    provider
+        .connect(
+          const SessionConfig(
+            sourceLanguage: 'en-US',
+            targetLanguage: 'fa-IR',
+            apiKey: 'test-key-value-123456',
+          ),
+        )
+        .listen(events.add);
+    await Future<void>.delayed(Duration.zero);
+
+    // Close frame only: no text frame and no error, so a socket that leaks
+    // `null` for closeCode/closeReason reports "Gemini went away" instead of
+    // the rejected key the server actually named.
+    fake.remoteClose(code: 1008, reason: 'invalid api key');
+    await Future<void>.delayed(Duration.zero);
+    expect(events.whereType<ProviderError>().last.code, 'keyInvalid');
+    await provider.disconnect();
+  });
+
   test('fake socket exposes close code and reason only after close', () async {
     final fake = FakeGeminiSocket();
     expect(fake.closeCode, isNull);

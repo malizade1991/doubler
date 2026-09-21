@@ -413,7 +413,8 @@ jobs:
               echo "distributed as a production build."
               echo
               echo "Add the four \`ANDROID_*\` signing secrets ([docs/CI.md](https://github.com/${{ github.repository }}/blob/main/docs/CI.md))"
-              echo "and re-run this tag to get a signed release."
+              echo "to build signed releases from now on; a tag whose release is already"
+              echo "published has to be rebuilt (releases here are immutable)."
             } > release-notes.md
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "title=DOUBLER $VERSION (unsigned QA build)" >> "$GITHUB_OUTPUT"

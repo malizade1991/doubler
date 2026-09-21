@@ -168,7 +168,6 @@ abstract final class AppTheme {
           color: scheme.onInverseSurface,
         ),
         shape: const RoundedRectangleBorder(borderRadius: AppRadii.card),
-        margin: AppSpacing.snackBar,
         closeIconColor: scheme.onInverseSurface,
       ),
       dividerTheme: DividerThemeData(color: scheme.outlineVariant, space: 1),

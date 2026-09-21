@@ -161,7 +161,7 @@ class _AboutHelpRoute extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           DoublerCard(child: Text(l10n.keyWarningLegacy)),
           const SizedBox(height: AppSpacing.sm),
-          DoublerCard(
+          const DoublerCard(
             child: SelectableText(GeminiConfig.keyConsoleUrl),
           ),
         ],

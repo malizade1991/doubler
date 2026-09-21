@@ -41,7 +41,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final steps = <_OnboardingStep>[
-      _OnboardingStep(Icons.hearing_active, l10n.onboardingWhat, l10n.tagline),
+      _OnboardingStep(Icons.hearing, l10n.onboardingWhat, l10n.tagline),
       _OnboardingStep(
         Icons.vpn_key_outlined,
         l10n.onboardingWhyKey,

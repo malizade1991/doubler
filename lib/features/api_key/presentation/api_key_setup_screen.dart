@@ -134,6 +134,7 @@ class _ApiKeySetupScreenState extends ConsumerState<ApiKeySetupScreen> {
       actions: [
         IconButton(
           tooltip: l10n.help,
+          icon: const Icon(Icons.help_outline),
           onPressed: () => showDoublerDialog(
             context: context,
             title: l10n.apiKeySetup,
@@ -233,19 +234,20 @@ class _ApiKeySetupScreenState extends ConsumerState<ApiKeySetupScreen> {
               ],
             ),
           ),
-          if (data?.warningCode != null) ...[
+          if (data != null && data.warningCode != null) ...[
             const SizedBox(height: AppSpacing.md),
             DoublerStatusBanner(
               mood: DoublerMood.warning,
-              message: l10n.message(data!.warningCode),
+              message: l10n.message(data.warningCode),
             ),
           ],
-          if (data?.messageCode != null &&
-              data!.messageCode != 'keySaved' &&
-              data!.messageCode != 'keyDeleted') ...[
+          if (data != null &&
+              data.messageCode != null &&
+              data.messageCode != 'keySaved' &&
+              data.messageCode != 'keyDeleted') ...[
             const SizedBox(height: AppSpacing.md),
             DoublerStatusBanner(
-              mood: data!.messageCode == 'connectionOk'
+              mood: data.messageCode == 'connectionOk'
                   ? DoublerMood.success
                   : DoublerMood.error,
               message: l10n.message(data.messageCode),

@@ -25,14 +25,14 @@ class _Swatch {
 class SubtitleSettingsPanel extends ConsumerWidget {
   const SubtitleSettingsPanel({super.key});
 
-  static const List<_Swatch> textSwatches = [
+  static const List<_Swatch> _textSwatches = [
     _Swatch(Color(0xFFFFFFFF), 'colorWhite'),
     _Swatch(AppColors.voice, 'colorAmber'),
     _Swatch(Color(0xFF7ED4E0), 'colorTeal'),
     _Swatch(AppColors.ink, 'colorInk'),
   ];
 
-  static const List<_Swatch> backgroundSwatches = [
+  static const List<_Swatch> _backgroundSwatches = [
     _Swatch(Color(0xCC07343C), 'colorDeepTeal'),
     _Swatch(Color(0x99000000), 'colorBlack'),
     _Swatch(Color(0x22FFFFFF), 'colorFrost'),
@@ -75,8 +75,8 @@ class SubtitleSettingsPanel extends ConsumerWidget {
           Container(
             height: 108,
             clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: const Color(0xFF102623),
+            decoration: const BoxDecoration(
+              color: Color(0xFF102623),
               borderRadius: AppRadii.card,
             ),
             child: SubtitleStage(text: l10n.tagline, style: style),
@@ -99,7 +99,7 @@ class SubtitleSettingsPanel extends ConsumerWidget {
             spacing: AppSpacing.xs,
             runSpacing: AppSpacing.xs,
             children: [
-              for (final swatch in textSwatches)
+              for (final swatch in _textSwatches)
                 DoublerChoicePill(
                   color: swatch.color,
                   label: l10n.message(swatch.labelKey),
@@ -116,7 +116,7 @@ class SubtitleSettingsPanel extends ConsumerWidget {
             spacing: AppSpacing.xs,
             runSpacing: AppSpacing.xs,
             children: [
-              for (final swatch in backgroundSwatches)
+              for (final swatch in _backgroundSwatches)
                 DoublerChoicePill(
                   color: swatch.color,
                   label: l10n.message(swatch.labelKey),

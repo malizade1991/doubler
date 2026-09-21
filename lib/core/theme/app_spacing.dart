@@ -19,7 +19,6 @@ abstract final class AppSpacing {
   static const EdgeInsets page = EdgeInsets.all(lg);
   static const EdgeInsets card = EdgeInsets.all(md);
   static const EdgeInsets sheet = EdgeInsets.fromLTRB(lg, sm, lg, lg);
-  static const EdgeInsets snackBar = EdgeInsets.fromLTRB(md, xs, md, md);
   static const EdgeInsets dialogInset = EdgeInsets.all(lg);
   static const EdgeInsets barPadding = EdgeInsets.fromLTRB(md, xs, md, xs);
 

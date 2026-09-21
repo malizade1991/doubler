@@ -110,7 +110,9 @@ class GeminiConnectionTester {
     final client = HttpClient();
     try {
       final request = await client.getUrl(uri);
-      request.headers.addAll(headers);
+      headers.forEach((String name, String value) {
+        request.headers.set(name, value);
+      });
       final response = await request.close();
       await response.drain<void>();
       return response.statusCode;

@@ -64,10 +64,17 @@ Play and must not be handed out as a production build. To restore the old fail-l
 behaviour (no release at all when signing is missing), set the workflow env
 `REQUIRE_SIGNED_RELEASE: "true"` at the top of `.github/workflows/android-ci.yml`.
 
-Re-run a tag after adding the secrets and the same tag publishes a signed release:
+### Turning an unsigned pre-release into a signed one
+
+This repository has **immutable releases**, so an already-published release can never take new
+assets. Adding the secrets later therefore needs one of:
 
 ```bash
+# a) delete the release (the tag stays) and rebuild that tag, now signed:
+gh release delete vX.Y.Z --yes
 gh workflow run android-ci.yml --ref vX.Y.Z -f run_release=true
+
+# b) or simply cut the next patch version — bump pubspec.yaml, commit, tag, push.
 ```
 
 ## Required GitHub Secrets (release signing only)
@@ -181,9 +188,10 @@ reads; it never edits or deletes a release.
 
 ## Remaining manual steps
 
-1. Add the four signing secrets (above) to turn the current unsigned pre-release into a
-   signed release: push the same tag again, or
-   `gh workflow run android-ci.yml --ref vX.Y.Z -f run_release=true`.
+1. Add the four signing secrets (above) to get *signed* releases from now on. The artifacts
+   published before that are unsigned pre-releases; because releases here are immutable, a tag
+   that already has a published release has to be rebuilt after `gh release delete vX.Y.Z
+   --yes` (the tag stays), or the next version can simply be tagged.
 2. Optionally replace the generated launcher icons with final brand assets.
 3. NDK: the runner image ships NDK 27/28/29 but not the `flutter.ndkVersion` (26.1.10909125).
    This app has **no native code**, so nothing resolves the NDK and no install is needed. If a

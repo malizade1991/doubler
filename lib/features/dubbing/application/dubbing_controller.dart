@@ -3,16 +3,24 @@ import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/l10n/app_localizations.dart';
 import '../../../domain/models/dubbing_session.dart';
 import '../../../domain/providers/translation_provider.dart';
 import '../../../core/l10n/locale_controller.dart';
 import '../../../infrastructure/audio/audio_capture.dart';
 import '../../../infrastructure/audio/audio_mixer.dart';
 import '../../../infrastructure/audio/audio_output.dart';
+import '../../../infrastructure/audio/platform_audio_bridge.dart';
 import '../../../infrastructure/gemini/gemini_translation_provider.dart';
 import '../../api_key/application/api_key_controller.dart';
 import '../../history/application/history_controller.dart';
 import '../../transcript/application/transcript_controller.dart';
+
+/// YouTube / other-app audio is the product default: start, leave, translate.
+final captureSourceProvider =
+    StateProvider<CaptureSource>((ref) => CaptureSource.playback);
+
+final openYouTubeOnStartProvider = StateProvider<bool>((ref) => true);
 
 final translationProviderFactory = Provider<TranslationProvider>(
   (ref) => GeminiTranslationProvider(),
@@ -48,35 +56,50 @@ class DubbingUiState {
   const DubbingUiState({
     this.phase = DubbingPhase.idle,
     this.errorCode,
+    this.statusCode,
     this.capturing = false,
     this.speaking = false,
     this.line = const LiveLine(),
     this.latencyMs,
+    this.source = CaptureSource.playback,
+    this.fellBackToMic = false,
   });
 
   final DubbingPhase phase;
   final String? errorCode;
+
+  /// Non-error status while connecting (`awaitingCapture`, `connectingGemini`).
+  final String? statusCode;
   final bool capturing;
   final bool speaking;
   final LiveLine line;
   final int? latencyMs;
+  final CaptureSource source;
+  final bool fellBackToMic;
 
   DubbingUiState copyWith({
     DubbingPhase? phase,
     String? errorCode,
+    String? statusCode,
     bool? capturing,
     bool? speaking,
     LiveLine? line,
     int? latencyMs,
+    CaptureSource? source,
+    bool? fellBackToMic,
     bool clearError = false,
+    bool clearStatus = false,
   }) {
     return DubbingUiState(
       phase: phase ?? this.phase,
       errorCode: clearError ? null : (errorCode ?? this.errorCode),
+      statusCode: clearStatus ? null : (statusCode ?? this.statusCode),
       capturing: capturing ?? this.capturing,
       speaking: speaking ?? this.speaking,
       line: line ?? this.line,
       latencyMs: latencyMs ?? this.latencyMs,
+      source: source ?? this.source,
+      fellBackToMic: fellBackToMic ?? this.fellBackToMic,
     );
   }
 }
@@ -87,15 +110,18 @@ final dubbingControllerProvider =
 class DubbingController extends Notifier<DubbingUiState> {
   StreamSubscription<ProviderEvent>? _sub;
   StreamSubscription<Uint8List>? _micSub;
+  StreamSubscription<String>? _controlSub;
   DateTime? _lastMicAt;
   DateTime? _sessionStarted;
   bool _awaitingFirstAudio = false;
+  bool _wentLive = false;
 
   @override
   DubbingUiState build() {
     ref.onDispose(() {
       unawaited(_sub?.cancel());
       unawaited(_micSub?.cancel());
+      unawaited(_controlSub?.cancel());
     });
     return const DubbingUiState();
   }
@@ -111,23 +137,65 @@ class DubbingController extends Notifier<DubbingUiState> {
       return;
     }
 
+    final requested = ref.read(captureSourceProvider);
+    final l10n = AppLocalizations(ref.read(localeProvider));
+    state = DubbingUiState(
+      phase: DubbingPhase.connecting,
+      statusCode: 'awaitingCapture',
+      source: requested,
+    );
+    _sessionStarted = DateTime.now();
+    _wentLive = false;
+    ref.read(transcriptControllerProvider.notifier).startSession();
+
     final capture = ref.read(audioCaptureProvider);
-    final permission = await capture.requestPermission();
-    if (permission != MicPermission.granted) {
-      state = const DubbingUiState(
+    capture.continueInBackground = true;
+    await _listenControls(capture);
+
+    var active = requested;
+    var fellBack = false;
+    var armError = await capture.arm(
+      requested,
+      notificationTitle: l10n.message('notificationTitle'),
+      notificationBody: l10n.message('notificationBody'),
+      notificationStop: l10n.message('notificationStop'),
+    );
+    // YouTube capture needs a consent dialog. If the user denies it, or the
+    // OS cannot share other-app audio, keep going on the microphone so the
+    // session is not a dead spinner — and say so.
+    if (armError != null && requested == CaptureSource.playback) {
+      fellBack = true;
+      active = CaptureSource.microphone;
+      armError = await capture.arm(
+        CaptureSource.microphone,
+        notificationTitle: l10n.message('notificationTitle'),
+        notificationBody: l10n.message('notificationBody'),
+        notificationStop: l10n.message('notificationStop'),
+      );
+    }
+    if (armError != null) {
+      state = DubbingUiState(
         phase: DubbingPhase.error,
-        errorCode: 'micDenied',
+        errorCode: armError,
+        source: active,
+        fellBackToMic: fellBack,
       );
       return;
     }
 
-    state = const DubbingUiState(phase: DubbingPhase.connecting);
-    _sessionStarted = DateTime.now();
-    ref.read(transcriptControllerProvider.notifier).startSession();
-    // Start capturing now, not after the handshake: the first words a user
-    // speaks must not be lost because the socket was still opening. The
-    // provider drops frames until `setupComplete` instead of erroring.
-    await _startMic();
+    // Start capturing now, not after the handshake: the first words must not
+    // be lost because the socket was still opening. The provider drops frames
+    // until setupComplete instead of erroring.
+    await _startCapture();
+    state = state.copyWith(
+      phase: DubbingPhase.connecting,
+      statusCode: fellBack ? 'playbackFallback' : 'connectingGemini',
+      capturing: true,
+      source: active,
+      fellBackToMic: fellBack,
+      clearError: true,
+    );
+
     final engine = ref.read(translationProviderFactory);
     final source = ref.read(sourceLanguageCodeProvider);
     final target = ref.read(targetLanguageCodeProvider);
@@ -146,7 +214,20 @@ class DubbingController extends Notifier<DubbingUiState> {
         .listen(_onEvent);
   }
 
-  Future<void> _startMic() async {
+  Future<void> _listenControls(AudioCapture capture) async {
+    await _controlSub?.cancel();
+    _controlSub = capture.sessionEvents.listen((event) {
+      if (event == PlatformAudioBridge.controlStop) {
+        unawaited(stop());
+      } else if (event == PlatformAudioBridge.controlInterrupted) {
+        onInterruption(AudioInterruption.phoneCall);
+      } else if (event == PlatformAudioBridge.controlResumed) {
+        onInterruption(AudioInterruption.none);
+      }
+    });
+  }
+
+  Future<void> _startCapture() async {
     await _micSub?.cancel();
     final capture = ref.read(audioCaptureProvider);
     final engine = ref.read(translationProviderFactory);
@@ -161,16 +242,34 @@ class DubbingController extends Notifier<DubbingUiState> {
   void _onEvent(ProviderEvent event) {
     switch (event) {
       case ProviderConnected():
-        state = state.copyWith(phase: DubbingPhase.live, capturing: true);
+        _wentLive = true;
+        state = state.copyWith(
+          phase: DubbingPhase.live,
+          capturing: true,
+          clearStatus: true,
+          clearError: true,
+        );
         unawaited(ref.read(audioOutputProvider).start());
+        applyMix();
       case ProviderError(:final code):
         unawaited(ref.read(audioCaptureProvider).pause());
         unawaited(ref.read(audioOutputProvider).pause());
-        state = state.copyWith(phase: DubbingPhase.error, errorCode: code);
+        state = state.copyWith(
+          phase: DubbingPhase.error,
+          errorCode: code,
+          clearStatus: true,
+        );
       case ProviderDisconnected():
+        if (state.phase == DubbingPhase.error) {
+          break;
+        }
         unawaited(ref.read(audioCaptureProvider).stop());
         unawaited(ref.read(audioOutputProvider).stop());
-        state = state.copyWith(phase: DubbingPhase.disconnected);
+        state = state.copyWith(
+          phase: DubbingPhase.disconnected,
+          capturing: false,
+          clearStatus: true,
+        );
       case ProviderTranscript(:final text, :final isInput, :final isFinal):
         state = state.copyWith(
           line: isInput
@@ -201,13 +300,26 @@ class DubbingController extends Notifier<DubbingUiState> {
     }
   }
 
+  void applyMix({bool? speaking}) {
+    _applyMix(speaking: speaking ?? state.speaking);
+  }
+
   void _applyMix({required bool speaking}) {
     final mixer = ref.read(audioMixerProvider);
+    final playback = state.source == CaptureSource.playback && !state.fellBackToMic;
+    mixer.microphoneMode = !playback;
     mixer.originalVolume = ref.read(originalVolumeProvider);
     mixer.dubbedVolume = ref.read(dubbedVolumeProvider);
     mixer.smartDucking = ref.read(smartDuckingProvider);
     mixer.speaking = speaking;
-    ref.read(audioOutputProvider).setGain(mixer.effectiveDubbedGain);
+    final output = ref.read(audioOutputProvider);
+    output.setGain(mixer.effectiveDubbedGain);
+    final duck = playback &&
+        ((mixer.smartDucking && speaking) || mixer.originalVolume < 0.08);
+    output.setOriginalPolicy(
+      originalGain: mixer.effectiveOriginalGain,
+      duck: duck,
+    );
   }
 
   Future<void> pauseCapture() async {

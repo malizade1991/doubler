@@ -17,6 +17,10 @@ abstract class GeminiSocket {
   Stream<dynamic> get messages;
   void add(String data);
   Future<void> close([int? code, String? reason]);
+
+  /// Populated after the socket closes. Null while it is still open.
+  int? get closeCode;
+  String? get closeReason;
 }
 
 typedef GeminiSocketFactory = Future<GeminiSocket> Function(
@@ -30,23 +34,45 @@ class IoGeminiSocket implements GeminiSocket {
 
   static Future<GeminiSocket> connect(GeminiLiveEndpoint endpoint) async {
     try {
-      final socket = await WebSocket.connect(
-        endpoint.uri.toString(),
-        headers: endpoint.headers.isEmpty ? null : endpoint.headers,
-      );
-      return IoGeminiSocket(socket);
+      return await _connectOnce(endpoint);
     } on Object catch (error) {
-      throw AppFailure(
-        code: classifyError(error),
-        message: describeError(error),
-      );
+      // A rejected upgrade that included `x-goog-api-key` is retried with the
+      // documented `?key=` query alone. Some fronts accept only one of the two.
+      if (endpoint.headers.isEmpty) {
+        throw _asFailure(error);
+      }
+      try {
+        return await _connectOnce(GeminiLiveEndpoint(uri: endpoint.uri));
+      } on Object {
+        throw _asFailure(error);
+      }
     }
+  }
+
+  static Future<GeminiSocket> _connectOnce(GeminiLiveEndpoint endpoint) async {
+    final socket = await WebSocket.connect(
+      endpoint.uri.toString(),
+      headers: endpoint.headers.isEmpty ? null : endpoint.headers,
+    );
+    return IoGeminiSocket(socket);
+  }
+
+  static AppFailure _asFailure(Object error) {
+    if (error is AppFailure) {
+      return error;
+    }
+    return AppFailure(
+      code: classifyError(error),
+      message: describeError(error),
+    );
   }
 
   /// A rejected HTTP upgrade means the key (or the model) is the problem;
   /// anything else is transport. Best-effort: dart:io only gives us a string.
+  /// The key is stripped first so a token that happens to contain "401" cannot
+  /// be classified from its own characters, and so it never reaches a log.
   static String classifyError(Object error) {
-    final text = error.toString().toLowerCase();
+    final text = _redact(error.toString()).toLowerCase();
     final status = statusCodeOf(error);
     if (status != null) {
       return GeminiErrorMapper.fromHttpStatus(status);
@@ -78,6 +104,12 @@ class IoGeminiSocket implements GeminiSocket {
 
   @override
   void add(String data) => _socket.add(data);
+
+  @override
+  int? get closeCode => _socket.closeCode;
+
+  @override
+  String? get closeReason => _socket.closeReason;
 
   @override
   Future<void> close([int? code, String? reason]) => _socket.close(code, reason);

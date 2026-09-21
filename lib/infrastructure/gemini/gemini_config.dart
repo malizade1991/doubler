@@ -31,16 +31,27 @@ abstract final class GeminiConfig {
   /// Where users mint a key. Shown (never auto-opened; no browser dependency).
   static const keyConsoleUrl = 'https://aistudio.google.com/apikey';
 
-  /// Override in one place if Google renames the Live model.
-  /// `gemini-2.5-flash-native-audio-preview-*` is retired — it now closes the
-  /// socket, which the user would read as "the key is invalid".
-  static const liveModel = 'gemini-3.8-live';
+  /// Continuous speech-to-speech translator. This is the dubbing default:
+  /// `gemini-3.8-live` is a conversational agent and waits for a turn, so a
+  /// YouTube video never gets a running translation.
+  /// `gemini-2.5-flash-native-audio-preview-*` is retired.
+  static const translateModel = 'gemini-3.5-live-translate-preview';
+
+  /// Conversational fallback if the translate model is not enabled for the key.
+  static const agentModel = 'gemini-3.8-live';
+
+  static const liveModel = translateModel;
 
   static const List<GeminiLiveModel> liveModels = [
     GeminiLiveModel(
-      id: 'gemini-3.8-live',
+      id: translateModel,
+      label: 'Gemini Live Translate',
+      note: 'Continuous dubbing · YouTube',
+    ),
+    GeminiLiveModel(
+      id: agentModel,
       label: 'Gemini 3.8 Live',
-      note: 'Lowest latency · default',
+      note: 'Conversational fallback',
     ),
     GeminiLiveModel(
       id: 'gemini-3.8-live-extended-thinking',
@@ -79,6 +90,13 @@ abstract final class GeminiConfig {
 
   static bool isKnownModel(String? modelId) {
     return liveModels.any((m) => m.id == modelId);
+  }
+
+  /// Live Translate is a pipeline, not a chatbot. Setup must not include a
+  /// system instruction or a voice config — both are hard errors on that model.
+  static bool isTranslateModel(String? modelId) {
+    final id = (modelId == null || modelId.isEmpty) ? liveModel : modelId;
+    return id.contains('translate');
   }
 
   static Uri liveUri(String apiKey) {

@@ -49,6 +49,17 @@ void main() {
     expect(mic.paused, isFalse);
   });
 
+  test('leaving for YouTube does not pause an active capture', () {
+    final mic = FakeAudioCapture();
+    mic.start();
+    mic.handleInterruption(AudioInterruption.background);
+    expect(mic.paused, isFalse);
+    expect(mic.continueInBackground, isTrue);
+    mic.continueInBackground = false;
+    mic.handleInterruption(AudioInterruption.background);
+    expect(mic.paused, isTrue);
+  });
+
   test('controller surfaces micDenied', () async {
     final store = MemoryKeyStore();
     await store.writeApiKey('AIzaSyDummyKeyValue123456');
@@ -61,6 +72,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
+    container.read(captureSourceProvider.notifier).state = CaptureSource.microphone;
     await container.read(dubbingControllerProvider.notifier).start();
     expect(container.read(dubbingControllerProvider).errorCode, 'micDenied');
   });
@@ -90,5 +102,25 @@ void main() {
 
   test('socket factory unused placeholder compiles', () {
     expect(FakeGeminiSocket().closed, isFalse);
+  });
+
+  test('denied YouTube capture falls back to the microphone', () async {
+    final store = MemoryKeyStore();
+    await store.writeApiKey('AIzaSyDummyKeyValue123456');
+    final mic = FakeAudioCapture(playbackAllowed: false);
+    final container = ProviderContainer(
+      overrides: [
+        secureKeyStoreProvider.overrideWithValue(store),
+        audioCaptureProvider.overrideWithValue(mic),
+        translationProviderFactory.overrideWithValue(_SinkProvider()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(dubbingControllerProvider.notifier).start();
+    final ui = container.read(dubbingControllerProvider);
+    expect(ui.source, CaptureSource.microphone);
+    expect(ui.fellBackToMic, isTrue);
+    expect(ui.errorCode, isNull);
+    expect(mic.lastSource, CaptureSource.microphone);
   });
 }

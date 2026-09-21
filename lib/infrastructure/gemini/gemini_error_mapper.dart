@@ -16,7 +16,10 @@ abstract final class GeminiErrorMapper {
     if (overQuota) {
       return 'quotaExceeded';
     }
-    if (_looksLikeKeyProblem(r) || r.contains('invalid')) {
+    // "invalid argument" is a bad setup, not a bad key. Only an auth-shaped
+    // reason may be reported as keyInvalid — the connection test already
+    // proved the key, and a protocol mismatch must not undo that.
+    if (_looksLikeKeyProblem(r)) {
       return 'keyInvalid';
     }
     if (r.contains('model') &&

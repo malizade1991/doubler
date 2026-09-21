@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:typed_data';
+
+import 'audio_capture.dart';
 
 /// PCM16 LE mono @ 24 kHz (Gemini Live output).
 abstract class AudioOutput {
@@ -21,6 +24,10 @@ abstract class AudioOutput {
   Future<void> stop();
 
   void setGain(double gain);
+
+  /// Playback-capture policy: [duck] asks the OS to lower YouTube while the
+  /// dub speaks. Ignored by microphone-only engines.
+  void setOriginalPolicy({required double originalGain, required bool duck}) {}
 
   int get bufferedBytes;
 }
@@ -91,11 +98,20 @@ class FakeAudioOutput implements AudioOutput {
 
   @override
   void setGain(double gain) => this.gain = gain.clamp(0, 1);
+
+  bool ducked = false;
+  double originalGain = 1;
+
+  @override
+  void setOriginalPolicy({required double originalGain, required bool duck}) {
+    this.originalGain = originalGain;
+    ducked = duck;
+  }
 }
 
 class PlatformAudioOutput implements AudioOutput {
   PlatformAudioOutput({AudioOutput? engine})
-      : _engine = engine ?? FakeAudioOutput();
+      : _engine = engine ?? ChannelAudioOutput();
 
   final AudioOutput _engine;
 
@@ -115,7 +131,63 @@ class PlatformAudioOutput implements AudioOutput {
   void setGain(double gain) => _engine.setGain(gain);
 
   @override
+  void setOriginalPolicy({required double originalGain, required bool duck}) {
+    _engine.setOriginalPolicy(originalGain: originalGain, duck: duck);
+  }
+
+  @override
   int get bufferedBytes => _engine.bufferedBytes;
+}
+
+/// Plays 24 kHz PCM through the platform bridge. Without this, a live session
+/// "succeeds" and then drops every translated sample on the floor.
+class ChannelAudioOutput implements AudioOutput {
+  ChannelAudioOutput({PlatformAudioBridgeHost? host})
+      : _host = host ?? const PlatformAudioBridgeHost();
+
+  final PlatformAudioBridgeHost _host;
+  int _buffered = 0;
+
+  @override
+  int get bufferedBytes => _buffered;
+
+  @override
+  Future<void> start() async {
+    await _host.invoke('startOutput');
+  }
+
+  @override
+  void enqueue(Uint8List pcm24k) {
+    if (pcm24k.isEmpty) {
+      return;
+    }
+    _buffered += pcm24k.length;
+    unawaited(_host.invoke('writeOutput', {'pcm': pcm24k}));
+  }
+
+  @override
+  Future<void> pause() => _host.invoke('pauseOutput');
+
+  @override
+  Future<void> stop() async {
+    _buffered = 0;
+    await _host.invoke('stopOutput');
+  }
+
+  @override
+  void setGain(double gain) {
+    unawaited(_host.invoke('setGain', {'gain': gain.clamp(0.0, 1.0)}));
+  }
+
+  @override
+  void setOriginalPolicy({required double originalGain, required bool duck}) {
+    unawaited(
+      _host.invoke('setDuck', {
+        'duck': duck,
+        'originalGain': originalGain,
+      }),
+    );
+  }
 }
 
 enum LatencyBand { good, fair, poor }

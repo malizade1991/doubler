@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,8 +10,11 @@ import '../../../core/routing/app_routes.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../domain/models/language_catalog.dart';
+import '../../../infrastructure/audio/audio_capture.dart';
 import '../../../infrastructure/audio/audio_lifecycle.dart';
 import '../../../infrastructure/audio/audio_output.dart';
+import '../../../infrastructure/audio/youtube_launcher.dart';
+import '../application/youtube_handoff.dart';
 import '../../../shared/widgets/audio_waveform.dart';
 import '../../../shared/widgets/doubler_button.dart';
 import '../../../shared/widgets/doubler_card.dart';
@@ -30,6 +35,7 @@ class LiveDubbingScreen extends ConsumerStatefulWidget {
 class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
   AudioLifecycleObserver? _lifecycle;
   bool _showControls = false;
+  bool _handedOff = false;
 
   @override
   void initState() {
@@ -51,10 +57,22 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
     if (dubbing.phase == DubbingPhase.idle ||
         dubbing.phase == DubbingPhase.error ||
         dubbing.phase == DubbingPhase.disconnected) {
+      _handedOff = false;
       await controller.start();
       return;
     }
     await controller.stop();
+  }
+
+  Future<void> _openYouTube() async {
+    await Future<void>.delayed(youtubeHandoffDelay);
+    if (!mounted) {
+      return;
+    }
+    if (ref.read(dubbingControllerProvider).phase != DubbingPhase.live) {
+      return;
+    }
+    await ref.read(youtubeLauncherProvider).open();
   }
 
   @override
@@ -64,11 +82,28 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
     final hasKey =
         ref.watch(apiKeyControllerProvider).valueOrNull?.hasKey ?? false;
     final dubbing = ref.watch(dubbingControllerProvider);
-    final source = LanguageCatalog.byCode(ref.watch(sourceLanguageCodeProvider));
+    final sourceLang = LanguageCatalog.byCode(ref.watch(sourceLanguageCodeProvider));
     final target = LanguageCatalog.byCode(ref.watch(targetLanguageCodeProvider));
     final subStyle = ref.watch(subtitleStyleProvider);
     final busy = dubbing.phase == DubbingPhase.connecting;
     final live = dubbing.phase == DubbingPhase.live;
+    final captureSource = ref.watch(captureSourceProvider);
+    final openOnStart = ref.watch(openYouTubeOnStartProvider);
+    final youtubeMode =
+        captureSource == CaptureSource.playback && !dubbing.fellBackToMic;
+
+    ref.listen(dubbingControllerProvider, (previous, next) {
+      if (!shouldOpenYouTube(
+        wasLive: previous?.phase == DubbingPhase.live,
+        isLive: next.phase == DubbingPhase.live,
+        enabled: ref.read(openYouTubeOnStartProvider),
+        alreadyOpened: _handedOff,
+      )) {
+        return;
+      }
+      _handedOff = true;
+      unawaited(_openYouTube());
+    });
 
     return DoublerScaffold(
       title: l10n.startLiveDubbing,
@@ -100,6 +135,91 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
               children: [
                 _StatusBar(l10n: l10n, dubbing: dubbing),
                 const SizedBox(height: AppSpacing.md),
+                if (!live) ...[
+                  Text(
+                    l10n.message('captureSource'),
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Wrap(
+                    spacing: AppSpacing.xs,
+                    runSpacing: AppSpacing.xs,
+                    children: [
+                      DoublerChoicePill(
+                        label: l10n.message('youtubeMode'),
+                        icon: Icons.smart_display_outlined,
+                        selected: captureSource == CaptureSource.playback,
+                        onSelected: () {
+                          if (busy) {
+                            return;
+                          }
+                          ref.read(captureSourceProvider.notifier).state =
+                              CaptureSource.playback;
+                        },
+                      ),
+                      DoublerChoicePill(
+                        label: l10n.message('micMode'),
+                        icon: Icons.mic_none,
+                        selected: captureSource == CaptureSource.microphone,
+                        onSelected: () {
+                          if (busy) {
+                            return;
+                          }
+                          ref.read(captureSourceProvider.notifier).state =
+                              CaptureSource.microphone;
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    youtubeMode ? l10n.message('youtubeHint') : l10n.micModeMixNote,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (youtubeMode) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    DoublerSwitchRow(
+                      title: l10n.message('openYouTubeOnStart'),
+                      value: openOnStart,
+                      onChanged: (value) {
+                        if (busy) {
+                          return;
+                        }
+                        ref.read(openYouTubeOnStartProvider.notifier).state = value;
+                      },
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.md),
+                ],
+                if (live)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        DoublerStatusBanner(
+                          mood: DoublerMood.success,
+                          icon: Icons.smart_display_outlined,
+                          message: dubbing.fellBackToMic
+                              ? l10n.message('playbackFallback')
+                              : l10n.message('youtubeLiveHint'),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        DoublerButton(
+                          label: l10n.message('openYouTube'),
+                          icon: Icons.open_in_new,
+                          variant: DoublerButtonVariant.secondary,
+                          onPressed: () {
+                            unawaited(ref.read(youtubeLauncherProvider).open());
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 DoublerCard(
                   padding: const EdgeInsets.symmetric(
                     horizontal: AppSpacing.md,
@@ -109,7 +229,7 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          '${source.flag} ${source.nativeName}',
+                          '${sourceLang.flag} ${sourceLang.nativeName}',
                           overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.titleSmall,
                         ),
@@ -147,9 +267,11 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
                             ),
                           ),
                           if (dubbing.capturing)
-                            const DoublerPill(
-                              label: 'MIC',
-                              icon: Icons.mic,
+                            DoublerPill(
+                              label: youtubeMode ? 'YT' : 'MIC',
+                              icon: youtubeMode
+                                  ? Icons.smart_display
+                                  : Icons.mic,
                               color: AppColors.live,
                               dense: true,
                             ),
@@ -183,7 +305,7 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
                 AudioWaveform(active: dubbing.capturing || dubbing.speaking),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  l10n.headphonesNote,
+                  youtubeMode ? l10n.message('youtubeSilenceHint') : l10n.headphonesNote,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
@@ -212,15 +334,19 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
                       label: l10n.originalVolume,
                       icon: Icons.volume_down,
                       value: ref.watch(originalVolumeProvider),
-                      onChanged: (v) =>
-                          ref.read(originalVolumeProvider.notifier).state = v,
+                      onChanged: (v) {
+                        ref.read(originalVolumeProvider.notifier).state = v;
+                        ref.read(dubbingControllerProvider.notifier).applyMix();
+                      },
                     ),
                     DoublerSlider(
                       label: l10n.dubbedVolume,
                       icon: Icons.record_voice_over_outlined,
                       value: ref.watch(dubbedVolumeProvider),
-                      onChanged: (v) =>
-                          ref.read(dubbedVolumeProvider.notifier).state = v,
+                      onChanged: (v) {
+                        ref.read(dubbedVolumeProvider.notifier).state = v;
+                        ref.read(dubbingControllerProvider.notifier).applyMix();
+                      },
                     ),
                     Text(
                       l10n.micModeMixNote,
@@ -261,16 +387,17 @@ class _LiveDubbingScreenState extends ConsumerState<LiveDubbingScreen> {
                     Expanded(
                       child: DoublerButton(
                         label: busy
-                            ? l10n.connecting
+                            ? l10n.cancel
                             : live
                                 ? l10n.stopSession
-                                : l10n.startSession,
+                                : (youtubeMode && openOnStart)
+                                    ? l10n.message('startAndOpenYouTube')
+                                    : l10n.startSession,
                         icon: busy
-                            ? null
+                            ? Icons.close_rounded
                             : live
                                 ? Icons.stop_rounded
                                 : Icons.play_arrow_rounded,
-                        busy: busy,
                         variant: live
                             ? DoublerButtonVariant.destructive
                             : DoublerButtonVariant.primary,
@@ -348,6 +475,9 @@ class _StatusBar extends StatelessWidget {
   }
 
   String _statusLabel(AppLocalizations l10n, DubbingUiState dubbing) {
+    if (dubbing.phase == DubbingPhase.connecting && dubbing.statusCode != null) {
+      return l10n.message(dubbing.statusCode);
+    }
     if (dubbing.errorCode != null) {
       return l10n.message(dubbing.errorCode);
     }

@@ -41,7 +41,14 @@ class GeminiTranslationProvider implements TranslationProvider {
     final config = _config;
     final key = config?.apiKey;
     if (config == null || key == null || key.isEmpty) {
-      _events.add(const ProviderError('keyMissing'));
+      // Deferred by one microtask on purpose: `connect()` hands the caller the
+      // stream and only then subscribes, and a broadcast stream drops events
+      // emitted while nobody is listening yet.
+      unawaited(
+        Future<void>.microtask(
+          () => _events.add(const ProviderError('keyMissing')),
+        ),
+      );
       return;
     }
     _setupComplete = false;

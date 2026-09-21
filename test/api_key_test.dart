@@ -130,6 +130,9 @@ void main() {
       overrides: [secureKeyStoreProvider.overrideWithValue(store)],
     );
     addTearDown(container.dispose);
+    // Let the controller finish loading first: an assertion race on the
+    // initial AsyncLoading → AsyncData transition is not what we test here.
+    await container.read(apiKeyControllerProvider.future);
     final result = await container
         .read(apiKeyControllerProvider.notifier)
         .save('short');

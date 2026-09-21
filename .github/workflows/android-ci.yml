@@ -164,10 +164,19 @@ jobs:
                     print('::error title=failing test::' + name.replace('%', '%25')[:400])
             # 2) then the exception text itself (up to the annotation cap).
             idx = [i for i, l in enumerate(lines) if 'EXCEPTION CAUGHT' in l]
-            for i in idx[:max(0, 9 - len(seen))]:
+            budget = max(0, 9 - len(seen))
+            for i in idx[:budget]:
                 block = [x.strip() for x in lines[i:i + 30] if x.strip()]
                 msg = ' | '.join(block)[:1200]
                 print('::error title=flutter test::' + msg.replace('%', '%25'))
+            # 3) plain expect() failures have no banner: quote the few lines the
+            #    reporter printed after the [E] marker instead of hiding them.
+            if not idx and budget:
+                for i, line in enumerate(lines):
+                    if '[E]' not in line or len(idx) >= budget:
+                        continue
+                    block = [x.strip() for x in lines[i:i + 8] if x.strip()]
+                    print('::error title=test failure detail::' + ' | '.join(block)[:900].replace('%', '%25'))
 
   build:
     name: Build Android artifacts

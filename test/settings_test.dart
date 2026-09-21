@@ -5,7 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/doubler_bindings.dart';
+
 void main() {
+  setUp(() => mockDoublerStoreChannel());
+
   testWidgets('theme mode provider switches MaterialApp', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: DoublerApp()));
     await tester.pump();

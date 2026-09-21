@@ -189,6 +189,9 @@ jobs:
           EXPECT_NAME="${{ steps.ver.outputs.name }}"
           EXPECT_CODE="${{ steps.ver.outputs.number }}"
           fail=0
+          parsed=0
+          offsets=""
+          declare -A seen_offsets=()
           {
             echo "### APK verification — \`$TAG\`"
             echo
@@ -199,17 +202,6 @@ jobs:
           for abi in arm64-v8a armeabi-v7a x86_64; do
             apk="dist/doubler-$TAG-$abi.apk"
             echo "=== $apk ==="
-
-            # Flutter's `--split-per-abi` stamps a per-ABI versionCode so Play can
-            # tell the splits apart: 1000 * ABI code + the app's build number,
-            # with armeabi-v7a=1, x86_64=2, arm64-v8a=4.
-            case "$abi" in
-              armeabi-v7a) abi_offset=1000 ;;
-              x86_64)      abi_offset=2000 ;;
-              arm64-v8a)   abi_offset=4000 ;;
-              *)           abi_offset=0 ;;
-            esac
-            expect_code=$(( EXPECT_CODE + abi_offset ))
 
             # 1) Container integrity — a truncated/mangled upload fails here.
             if ! unzip -t "$apk" >/dev/null; then
@@ -252,9 +244,20 @@ jobs:
 
             [ "$pkg" = "com.doubler.doubler" ] || { echo "::error file=$apk::Unexpected package '$pkg'."; fail=1; }
             [ "$vname" = "$EXPECT_NAME" ] || { echo "::error file=$apk::versionName '$vname' != expected '$EXPECT_NAME' for $TAG."; fail=1; }
-            if [ "$vcode" != "$expect_code" ]; then
-              echo "::error file=$apk::versionCode '$vcode' != expected '$expect_code' for $abi (build number $EXPECT_CODE + Flutter's per-ABI offset $abi_offset)."
+            # Flutter's `--split-per-abi` overrides versionCode with
+            # `abiCode * 1000 + buildNumber` (armeabi-v7a 1, arm64-v8a 2,
+            # x86_64 4). The exact codes are Flutter's business, so the offset is
+            # derived here instead of pinned; what Play actually requires is a
+            # positive 1000-multiple offset on the shared base build number and a
+            # *distinct* code per ABI, which the checks below enforce.
+            offset=$(( vcode - EXPECT_CODE ))
+            if [ "$offset" -le 0 ] || [ $(( offset % 1000 )) -ne 0 ]; then
+              echo "::error file=$apk::versionCode '$vcode' is not build number $EXPECT_CODE plus a positive 1000-multiple ABI offset (offset $offset); Android would treat these splits as the same or older build."
               fail=1
+            else
+              seen_offsets["$offset"]="$abi"
+              offsets="$offsets $abi=+$offset"
+              parsed=$(( parsed + 1 ))
             fi
             printf '%s' "$native" | grep -q "$abi" || { echo "::error file=$apk::native-code '$native' does not match file ABI '$abi'."; fail=1; }
 
@@ -277,8 +280,16 @@ jobs:
               sig="release keystore"
             fi
 
-            echo "| \`$(basename "$apk")\` | $abi | $vname | $vcode (expected $expect_code) | $sig | $minsdk | $targetsdk |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| \`$(basename "$apk")\` | $abi | $vname | $vcode | $sig | $minsdk | $targetsdk |" >> "$GITHUB_STEP_SUMMARY"
           done
+
+          if [ -n "$offsets" ]; then
+            echo "versionCode offsets vs build number $EXPECT_CODE:$offsets"
+          fi
+          if [ "$parsed" -eq 3 ] && [ "${#seen_offsets[@]}" -ne 3 ]; then
+            echo "::error::Two ABIs share a versionCode offset ($offsets); each split needs its own or Play cannot route per device."
+            fail=1
+          fi
           [ "$fail" -eq 0 ] || exit 1
           echo "All three split-per-ABI APKs verify."
 

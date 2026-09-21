@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:doubler/domain/providers/translation_provider.dart';
+import 'package:doubler/infrastructure/gemini/gemini_error_mapper.dart';
 import 'package:doubler/infrastructure/gemini/gemini_socket.dart';
 import 'package:doubler/infrastructure/gemini/gemini_translation_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,5 +66,39 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(events.whereType<ProviderConnected>(), isNotEmpty);
     expect(events.whereType<ProviderError>(), isEmpty);
+  });
+
+  test('a peer close keeps its code and reason for the failure mapper', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      if (!WebSocketTransformer.isUpgradeRequest(request)) {
+        request.response.statusCode = 400;
+        await request.response.close();
+        return;
+      }
+      final peer = await WebSocketTransformer.upgrade(request);
+      peer.listen((_) {});
+      // Let the client finish reading the upgrade response before the close
+      // frame follows, so this tests the close code and not a broken handshake.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await peer.close(1008, 'invalid api key');
+    });
+
+    final socket = await IoGeminiSocket.connect(
+      GeminiLiveEndpoint(uri: Uri.parse('ws://127.0.0.1:${server.port}/live')),
+    );
+    final done = Completer<void>();
+    socket.messages.listen((_) {}, onDone: done.complete);
+    await done.future.timeout(const Duration(seconds: 5));
+
+    // A null here turns a rejected key into "Gemini did not answer", which is
+    // the failure the missing interface getters kept invisible.
+    expect(socket.closeCode, 1008);
+    expect(socket.closeReason, 'invalid api key');
+    expect(
+      GeminiErrorMapper.fromCloseCode(socket.closeCode, socket.closeReason),
+      'keyInvalid',
+    );
   });
 }

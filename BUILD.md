@@ -6,7 +6,9 @@
 - Android SDK; Xcode for iOS
 - **No backend to deploy**
 
-This sandbox could not download the Dart SDK (`storage.googleapis.com`). Build on a machine with Flutter installed.
+The authoring sandbox has no network access to `storage.googleapis.com` / `pub.dev`, so builds
+and tests run in GitHub Actions (`.github/workflows/android-ci.yml`) — that is the source of
+truth. Build locally on a machine with Flutter installed.
 
 ## Commands
 
@@ -49,9 +51,11 @@ Replace default launcher when designing store assets. Brand: DOUBLER / دوبل�
 ## CI/CD (GitHub Actions)
 
 Android builds and releases are automated by `.github/workflows/android-ci.yml`:
-PR / push to `main` run analyze + test + build; a `vX.Y.Z` tag builds signed split-per-ABI
-APKs + an AAB and publishes a GitHub Release. Full setup (signing secrets, triggers, artifact
-paths, downloads) is in [docs/CI.md](docs/CI.md).
+PR / push to `main` run analyze + test + build; a `vX.Y.Z` tag builds split-per-ABI APKs + an
+AAB and publishes a GitHub Release. With the four `ANDROID_*` secrets the release is signed;
+without them the tag is published as an **unsigned pre-release** (debug keystore) instead of
+failing, so a tag always produces something downloadable. Full setup (signing secrets,
+triggers, artifact paths, downloads) is in [docs/CI.md](docs/CI.md).
 
 > ⚠️ Do **not** add `generate: true` to `pubspec.yaml` or run `flutter gen-l10n`: the checked-in
 > `lib/core/l10n/app_localizations.dart` is hand-written and would be overwritten. See docs/CI.md.

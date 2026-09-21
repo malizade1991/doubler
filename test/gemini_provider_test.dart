@@ -232,4 +232,63 @@ void main() {
     );
     await provider.disconnect();
   });
+
+  test('error text is redacted before classification', () {
+    // A key whose own characters contain "401" / "denied" must not be able to
+    // classify itself — or reach a log. (Error text arrives as Object; a bare
+    // string is enough to exercise the classifier.)
+    const query = 'socket closed for key=AQ.ab8-xy.z401.denied';
+    expect(IoGeminiSocket.statusCodeOf(query), isNull);
+    expect(IoGeminiSocket.classifyError(query), 'geminiUnavailable');
+
+    const header =
+        'handshake rejected for x-goog-api-key: AIzaSyDummyKey401Quota';
+    expect(IoGeminiSocket.statusCodeOf(header), isNull);
+    expect(IoGeminiSocket.classifyError(header), 'geminiUnavailable');
+
+    const bare = 'dead: AQ.abc.403.def';
+    expect(IoGeminiSocket.statusCodeOf(bare), isNull);
+    expect(IoGeminiSocket.classifyError(bare), 'geminiUnavailable');
+
+    // Real statuses outside a key still classify.
+    expect(IoGeminiSocket.statusCodeOf('HTTP 429 too many'), 429);
+    expect(IoGeminiSocket.classifyError('HTTP 429'), 'quotaExceeded');
+  });
+
+  test('a peer close is classified from its code, not from silence', () async {
+    final fake = FakeGeminiSocket();
+    final provider = GeminiTranslationProvider(
+      socketFactory: (_) async => fake,
+      maxReconnects: 0,
+    );
+    final events = <ProviderEvent>[];
+    provider
+        .connect(
+          const SessionConfig(
+            sourceLanguage: 'en-US',
+            targetLanguage: 'fa-IR',
+            apiKey: 'test-key-value-123456',
+          ),
+        )
+        .listen(events.add);
+    await Future<void>.delayed(Duration.zero);
+
+    // Close frame only: no text frame and no error, so a socket that leaks
+    // `null` for closeCode/closeReason reports "Gemini went away" instead of
+    // the rejected key the server actually named.
+    fake.remoteClose(code: 1008, reason: 'invalid api key');
+    await Future<void>.delayed(Duration.zero);
+    expect(events.whereType<ProviderError>().last.code, 'keyInvalid');
+    await provider.disconnect();
+  });
+
+  test('fake socket exposes close code and reason only after close', () async {
+    final fake = FakeGeminiSocket();
+    expect(fake.closeCode, isNull);
+    expect(fake.closeReason, isNull);
+    await fake.close(1006, 'going away');
+    expect(fake.closed, isTrue);
+    expect(fake.closeCode, 1006);
+    expect(fake.closeReason, 'going away');
+  });
 }

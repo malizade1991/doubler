@@ -49,9 +49,30 @@ The workflow triggers on `tags: ["v*"]` and every release step is gated on
 a build and does **not** publish — an earlier `1.0.0` tag produced a release with zero
 assets for exactly this reason. Always tag `vX.Y.Z`, matching `pubspec.yaml`.
 
+## Signing: signed releases vs. unsigned pre-releases
+
+A `v*` tag always builds APKs + an AAB. Whether the published release is *signed* depends on
+the four secrets below:
+
+| Secrets | Build job | Published as |
+|---------|-----------|--------------|
+| all four set | signed with the release keystore | normal release, becomes **Latest** |
+| any missing | debug keystore, `signed=false` | **pre-release**, titled `… (unsigned QA build)`, with a warning annotation and a step-summary block |
+
+An unsigned pre-release is for testing and sideloading only: it cannot be uploaded to Google
+Play and must not be handed out as a production build. To restore the old fail-loudly
+behaviour (no release at all when signing is missing), set the workflow env
+`REQUIRE_SIGNED_RELEASE: "true"` at the top of `.github/workflows/android-ci.yml`.
+
+Re-run a tag after adding the secrets and the same tag publishes a signed release:
+
+```bash
+gh workflow run android-ci.yml --ref vX.Y.Z -f run_release=true
+```
+
 ## Required GitHub Secrets (release signing only)
 
-PR/branch builds need **no secrets**. Publishing a tag release requires all four:
+PR/branch builds need **no secrets**. A *signed* tag release requires all four:
 
 | Secret | Contents |
 |--------|----------|
@@ -70,8 +91,9 @@ base64 -w0 upload-keystore.jks   # macOS: base64 upload-keystore.jks | pbcopy
 
 Set them under **Settings → Secrets and variables → Actions → New repository secret**.
 
-If any of the four is missing on a tag run, the `build` job fails loudly before producing a
-release, and no debug-signed APK is ever published as a release.
+If any of the four is missing on a tag run, the assets are built with the debug keystore and
+the tag is published as an unsigned **pre-release** instead (see above) — never as a normal
+release, so a debug-signed APK can never be mistaken for a production build.
 
 ## Triggering
 
@@ -112,16 +134,21 @@ silently upload an empty artifact.
 ## Downloading
 
 - **Actions artifacts** (any run): repo → *Actions* → the run → *Artifacts* → `android-release-<run_number>`.
-  Or via CLI: `gh run download <RUN_ID> -n android-release-<RUN_ID>` (list with `gh run list`).
-- **GitHub Releases** (tag runs): repo → *Releases* → `DOUBLER vX.Y.Z` → assets.
-  Or via CLI: `gh release download vX.Y.Z -p '*.apk'`.
+  Or via CLI: `gh run download <RUN_ID> -n android-release-<run_number>` — run it from inside a
+  git clone of this repo (or add `-R malizade1991/doubler`), otherwise `gh` cannot tell which
+  repository the run belongs to.
+- **GitHub Releases** (tag runs): repo → *Releases* → `DOUBLER vX.Y.Z` → assets, renamed for
+  humans: `doubler-vX.Y.Z-arm64-v8a.apk` (most phones), `…-armeabi-v7a.apk`, `…-x86_64.apk`,
+  and `doubler-vX.Y.Z.aab` for Play. Or via CLI: `gh release download vX.Y.Z`.
 
 ## Remaining manual steps
 
-1. Add the four signing secrets (above) before the first tag release.
+1. Add the four signing secrets (above) to turn the current unsigned pre-release into a
+   signed release: push the same tag again, or
+   `gh workflow run android-ci.yml --ref vX.Y.Z -f run_release=true`.
 2. Optionally replace the generated launcher icons with final brand assets.
 3. NDK: the runner image ships NDK 27/28/29 but not the `flutter.ndkVersion` (26.1.10909125).
    This app has **no native code**, so nothing resolves the NDK and no install is needed. If a
    future plugin adds native code, add a step: `sdkmanager --install "ndk;26.1.10909125"`.
-4. `flutter analyze`/`flutter test` could not be executed in the authoring sandbox (no Flutter
-   SDK/network for Dart deps). Run them once locally to confirm a green baseline.
+4. `flutter analyze --fatal-infos --fatal-warnings` and `flutter test` run in CI on every
+   push/PR — that is the source of truth, since the authoring sandbox has no Flutter SDK.

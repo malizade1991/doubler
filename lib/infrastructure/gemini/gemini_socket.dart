@@ -67,6 +67,24 @@ class IoGeminiSocket implements GeminiSocket {
     );
   }
 
+  /// Strips API keys out of [text] before it is classified or logged, so a
+  /// token that happens to contain "401" cannot be classified from its own
+  /// characters and so a key never reaches a log. Covers `key=` / `api-key:`
+  /// labels (including `?key=` query parts and `x-goog-api-key` headers) and
+  /// bare `AIza…` / `AQ.…` keys, which is every shape Google has shipped.
+  static String _redact(String text) {
+    return text
+        .replaceAllMapped(
+          RegExp(
+            r'''((?:x[-\s]?goog[-\s]?api[-\s]?key|api[-\s]?key|key)\s*[:=]\s*)[^\s&"'\(\)\[\]\{\},;]+''',
+            caseSensitive: false,
+          ),
+          (match) => '${match[1]}REDACTED',
+        )
+        .replaceAll(RegExp(r'AIza[0-9A-Za-z_\-]+'), 'REDACTED')
+        .replaceAll(RegExp(r'AQ[.][0-9A-Za-z_.\-]+'), 'REDACTED');
+  }
+
   /// A rejected HTTP upgrade means the key (or the model) is the problem;
   /// anything else is transport. Best-effort: dart:io only gives us a string.
   /// The key is stripped first so a token that happens to contain "401" cannot
@@ -87,7 +105,10 @@ class IoGeminiSocket implements GeminiSocket {
   }
 
   static int? statusCodeOf(Object error) {
-    final match = RegExp(r'\b(4\d\d|5\d\d)\b').firstMatch(error.toString());
+    // Redacted too: an `AQ.…` key contains dots, so a status-shaped run of
+    // digits inside the key must not be read as an HTTP status.
+    final match =
+        RegExp(r'\b(4\d\d|5\d\d)\b').firstMatch(_redact(error.toString()));
     if (match == null) {
       return null;
     }
@@ -121,11 +142,21 @@ class FakeGeminiSocket implements GeminiSocket {
   final _controller = StreamController<dynamic>.broadcast();
   final List<String> sent = [];
   int? closedCode;
+  String? closedReason;
   bool closed = false;
 
   void emit(dynamic message) => _controller.add(message);
 
   void emitError(Object error) => _controller.addError(error);
+
+  /// Simulates the peer dropping the connection, close frame included, so the
+  /// provider's `onDone` path runs the way a real close runs it — that path
+  /// classifies the failure from [closeCode]/[closeReason], not from a message.
+  void remoteClose({int? code, String? reason}) {
+    closedCode = code;
+    closedReason = reason;
+    unawaited(_controller.close());
+  }
 
   @override
   Stream<dynamic> get messages => _controller.stream;
@@ -134,9 +165,16 @@ class FakeGeminiSocket implements GeminiSocket {
   void add(String data) => sent.add(data);
 
   @override
+  int? get closeCode => closedCode;
+
+  @override
+  String? get closeReason => closedReason;
+
+  @override
   Future<void> close([int? code, String? reason]) async {
     closed = true;
     closedCode = code;
+    closedReason = reason;
     await _controller.close();
   }
 }

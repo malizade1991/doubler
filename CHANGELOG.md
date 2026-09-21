@@ -1,8 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 ### Fixed
+
+- **CI analyze gate was red on `main`.** `IoGeminiSocket` now defines the `_redact`
+  sanitizer it calls (API keys are stripped from error text before classification — a
+  token that happens to contain "401" can neither classify itself nor reach a log, and
+  `statusCodeOf` redacts too), `FakeGeminiSocket` implements `closeCode`/`closeReason`,
+  the dead `_wentLive` field is gone, and a redundant `dart:typed_data` import was
+  dropped. `flutter analyze --fatal-infos --fatal-warnings` is clean.
+- **A `v*` tag with no Android signing secrets published nothing.** The old signing gate
+  failed the build job and the release job was skipped — that is what happened to the
+  `v0.1.0` tag. Signing is now resolved instead of enforced: with all four `ANDROID_*`
+  secrets the release is signed as before, and without them the tag is built with the debug
+  keystore and published as an explicitly labelled **unsigned pre-release** with
+  `doubler-<tag>-<abi>.apk` / `doubler-<tag>.aab` assets, so a tag always produces something
+  downloadable. `REQUIRE_SIGNED_RELEASE: "true"` (workflow env) restores the fail-loudly
+  behaviour.
 
 - **Start dubbing stayed on «در حال اتصال».** Gemini answers the Live handshake with
   `{"setupComplete": {}}`, not `true`. The client now treats that empty object (and a binary

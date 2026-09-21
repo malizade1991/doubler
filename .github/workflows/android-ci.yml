@@ -151,8 +151,20 @@ jobs:
         env:
           TEST_ANNOTATE: |
             lines = open('test.txt', errors='replace').read().splitlines()
+            # 1) name every failing test: "[E]" lines carry file + test name, and
+            #    plain expect() failures print no banner, so this is the only
+            #    reliable way to learn which tests broke from the checks API.
+            seen = set()
+            for line in lines:
+                if '[E]' not in line:
+                    continue
+                name = line.split(':', 2)[-1].replace('[E]', '').strip().lstrip(': ')
+                if name and name not in seen:
+                    seen.add(name)
+                    print('::error title=failing test::' + name.replace('%', '%25')[:400])
+            # 2) then the exception text itself (up to the annotation cap).
             idx = [i for i, l in enumerate(lines) if 'EXCEPTION CAUGHT' in l]
-            for i in idx[:20]:
+            for i in idx[:max(0, 9 - len(seen))]:
                 block = [x.strip() for x in lines[i:i + 30] if x.strip()]
                 msg = ' | '.join(block)[:1200]
                 print('::error title=flutter test::' + msg.replace('%', '%25'))

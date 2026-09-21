@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -40,7 +42,19 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     if (!mounted) {
       return;
     }
-    await ref.read(apiKeyControllerProvider.future);
+    // Reading the key is a platform-channel round trip: a few milliseconds on
+    // a device, but it must never hold the first screen hostage (no store in
+    // tests, a slow keystore on a cold device). Wait briefly, then route with
+    // whatever is already known.
+    try {
+      await ref
+          .read(apiKeyControllerProvider.future)
+          .timeout(const Duration(milliseconds: 600));
+    } on TimeoutException {
+      // fall through and use the state we have
+    } on Object {
+      // A broken key store must not block the first screen either.
+    }
     if (!mounted) {
       return;
     }

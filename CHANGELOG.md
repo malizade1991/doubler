@@ -1,8 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 ### Fixed
+
+- **CI analyze gate was red on `main`.** `IoGeminiSocket` now defines the `_redact`
+  sanitizer it calls (API keys are stripped from error text before classification — a
+  token that happens to contain "401" can neither classify itself nor reach a log, and
+  `statusCodeOf` redacts too), `FakeGeminiSocket` implements `closeCode`/`closeReason`,
+  the dead `_wentLive` field is gone, and a redundant `dart:typed_data` import was
+  dropped. `flutter analyze --fatal-infos --fatal-warnings` is clean.
 
 - **Start dubbing stayed on «در حال اتصال».** Gemini answers the Live handshake with
   `{"setupComplete": {}}`, not `true`. The client now treats that empty object (and a binary

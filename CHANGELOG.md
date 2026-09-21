@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+### Fixed
+
+- **The published release had no downloadable files.** GitHub rejected the asset upload with
+  *"Cannot upload asset … to an immutable release"*: the workflow created the release already
+  published, and an immutable release only accepts assets before it is published. The release
+  is now created as a **draft**, the APK/AAB files are attached, and only then is it published
+  (`gh release edit --draft=false`, keeping `prerelease` when the build is unsigned). A failed
+  upload now leaves an invisible draft instead of a public release with zero assets.
+
 ## 0.2.0
 
 ### Fixed

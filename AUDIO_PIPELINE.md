@@ -16,8 +16,11 @@ Microphone / (future: loopback)
 ## Capture (implemented)
 
 - Abstraction: `AudioCapture` (`lib/infrastructure/audio/audio_capture.dart`)
-- Format: PCM16 LE mono 16 kHz, 20 ms frames (640 bytes)
-- `FakeAudioCapture` for tests; `PlatformAudioCapture` wraps a pluggable engine (`record` / platform channel)
+- Format: PCM16 LE mono 16 kHz. YouTube capture emits 100 ms frames after resampling.
+- `FakeAudioCapture` for tests. Production `ChannelAudioCapture` uses
+  `com.doubler.doubler/audio`: Android playback capture (MediaProjection, own UID excluded)
+  or the microphone, plus a foreground service so switching to YouTube does not kill the isolate.
+- iOS cannot capture other apps. `playbackUnsupported` falls back to the microphone.
 - Permission denied → `micDenied`
 - Interruptions: phone, audio focus, background, route change
 

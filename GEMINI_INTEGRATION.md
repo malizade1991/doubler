@@ -56,6 +56,8 @@ with headers-only. One of the two always works; the cost of sending both is zero
    instruction, input/output transcription, session resumption).
 3. **Wait for `setupComplete`** before anything else: `sendAudio` drops frames that arrive
    earlier. `ProviderConnected` is emitted from `setupComplete`, not from the socket opening.
+   The server sends `{"setupComplete": {}}` (an empty protobuf message), **not** `true`.
+   Treating only `true` as success left the live button on «در حال اتصال» forever.
 4. Stream `realtime_input.media_chunks` — raw little-endian PCM16 at 16 kHz
    (`audio/pcm;rate=16000`). Model audio is always 24 kHz PCM16.
 5. `gemini-3.8-live` does not accept `proactive_audio: false`, `affective_dialog` or
@@ -80,9 +82,15 @@ socket/DNS → `networkUnavailable`. Codes are l10n keys resolved by
 ## Models
 
 IDs live in one place (`GeminiConfig.liveModels`); the Settings → Gemini screen can switch
-model without an app update if Google renames one. `modelResource()` falls back to
-`models/gemini-3.8-live`; `gemini-2.5-flash-native-audio-preview-*` is **shut down** and must
+model without an app update if Google renames one. The dubbing default is
+`models/gemini-3.5-live-translate-preview` (continuous interpreter, `translationConfig`,
+no system instruction — that model rejects instructions). `modelResource()` falls back to
+that id. `gemini-3.8-live` remains the conversational fallback if the translate model is
+not enabled for the key. `gemini-2.5-flash-native-audio-preview-*` is **shut down** and must
 not come back — a dead model id surfaces to users as "invalid key".
+
+Setup and audio frames are camelCase (`generationConfig`, `realtimeInput.audio`). A handshake
+that never receives `setupComplete` times out (`connectionTimeout`) instead of spinning.
 
 ## Adding another provider later
 

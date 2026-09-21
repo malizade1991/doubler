@@ -4,9 +4,16 @@ import 'audio_capture.dart';
 
 /// Maps app lifecycle and route-style interruptions onto [AudioCapture].
 class AudioLifecycleObserver with WidgetsBindingObserver {
-  AudioLifecycleObserver(this.capture);
+  AudioLifecycleObserver(
+    this.capture, {
+    this.keepAliveInBackground = true,
+  });
 
   final AudioCapture capture;
+
+  /// YouTube dubbing requires the session to survive the activity pause that
+  /// happens the moment the user leaves for another app.
+  final bool keepAliveInBackground;
 
   void attach() {
     WidgetsBinding.instance.addObserver(this);

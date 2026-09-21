@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **Start dubbing stayed on «در حال اتصال».** Gemini answers the Live handshake with
+  `{"setupComplete": {}}`, not `true`. The client now treats that empty object (and a binary
+  JSON frame) as connected, speaks the current camelCase protocol, and uses
+  `gemini-3.5-live-translate-preview` so a video is translated continuously instead of waiting
+  for a chat turn. If the server never answers, the button times out instead of spinning.
+- **Leaving the app stopped the session, and capture/playback were fakes.** Start now arms
+  Android playback capture (YouTube and other apps), keeps a foreground service alive, and
+  opens YouTube once the socket is live. Dubbed audio plays while YouTube is ducked. iOS has
+  no other-app capture; it falls back to the microphone and says so.
 - **Valid Gemini keys were rejected as invalid.** `ApiKeyValidator` only allowed
   `[A-Za-z0-9_-]`, so Google's current auth keys (`AQ.…`, which contain a dot) failed the
   format check before anything was sent. Validation is now shape-agnostic (sanitize →

@@ -66,7 +66,10 @@ void main() {
     expect(fake.sent, isNotEmpty);
     expect(fake.sent.first, contains('setup'));
     expect(fake.sent.first, isNot(contains('test-key-value-123456')));
-    expect(fake.sent.first, contains('models/gemini-3.8-live'));
+    expect(fake.sent.first, contains('models/gemini-3.5-live-translate-preview'));
+    expect(fake.sent.first, contains('translationConfig'));
+    expect(fake.sent.first, contains('"targetLanguageCode":"fa"'));
+    expect(fake.sent.first, isNot(contains('systemInstruction')));
     // Nothing is "connected" until the server confirms the handshake.
     expect(events.whereType<ProviderConnected>(), isEmpty);
 
@@ -80,8 +83,10 @@ void main() {
     expect(events.whereType<ProviderConnected>(), isNotEmpty);
 
     provider.sendAudio(Uint8List.fromList([1, 2, 3, 4]));
-    expect(fake.sent.last, contains('realtime_input'));
+    expect(fake.sent.last, contains('realtimeInput'));
     expect(fake.sent.last, contains('audio/pcm;rate=16000'));
+    expect(fake.sent.last, isNot(contains('media_chunks')));
+    expect(fake.sent.last, isNot(contains('mediaChunks')));
 
     fake.emit(
       jsonEncode({
@@ -129,6 +134,102 @@ void main() {
         .listen(events.add);
     await Future<void>.delayed(Duration.zero);
     expect(events.whereType<ProviderError>().last.code, 'keyMissing');
+    await provider.disconnect();
+  });
+
+  test('setupComplete as an empty object is the real handshake', () async {
+    final fake = FakeGeminiSocket();
+    final provider = GeminiTranslationProvider(
+      socketFactory: (_) async => fake,
+      maxReconnects: 0,
+    );
+    final events = <ProviderEvent>[];
+    provider
+        .connect(
+          const SessionConfig(
+            sourceLanguage: 'en-US',
+            targetLanguage: 'fa-IR',
+            apiKey: 'test-key-value-123456',
+          ),
+        )
+        .listen(events.add);
+    await Future<void>.delayed(Duration.zero);
+    // Documented wire shape. `== true` never matches this, which is why the
+    // button stayed on «در حال اتصال».
+    fake.emit(jsonEncode({'setupComplete': <String, dynamic>{}}));
+    await Future<void>.delayed(Duration.zero);
+    expect(events.whereType<ProviderConnected>(), isNotEmpty);
+
+    fake.emit(utf8.encode(jsonEncode({'setup_complete': <String, dynamic>{}})));
+    provider.sendAudio(Uint8List.fromList([9, 8, 7, 6]));
+    expect(fake.sent.last, contains('realtimeInput'));
+    await provider.disconnect();
+  });
+
+  test('serverContent alone is enough to leave connecting', () async {
+    final fake = FakeGeminiSocket();
+    final provider = GeminiTranslationProvider(
+      socketFactory: (_) async => fake,
+      maxReconnects: 0,
+    );
+    final events = <ProviderEvent>[];
+    provider
+        .connect(
+          const SessionConfig(
+            sourceLanguage: 'en-US',
+            targetLanguage: 'fa-IR',
+            apiKey: 'test-key-value-123456',
+          ),
+        )
+        .listen(events.add);
+    await Future<void>.delayed(Duration.zero);
+    fake.emit(
+      jsonEncode({
+        'serverContent': {
+          'modelTurn': {
+            'parts': [
+              {
+                'inlineData': {
+                  'mimeType': 'audio/pcm',
+                  'data': base64Encode([1, 2]),
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(events.whereType<ProviderConnected>(), isNotEmpty);
+    expect(events.whereType<ProviderAudioOut>(), isNotEmpty);
+    provider.sendAudio(Uint8List.fromList([1, 2, 3, 4]));
+    expect(fake.sent.last, contains('realtimeInput'));
+    await provider.disconnect();
+  });
+
+  test('a silent socket becomes connectionTimeout, not an endless spinner', () async {
+    final fake = FakeGeminiSocket();
+    final provider = GeminiTranslationProvider(
+      socketFactory: (_) async => fake,
+      maxReconnects: 0,
+      handshakeTimeout: const Duration(milliseconds: 40),
+    );
+    final events = <ProviderEvent>[];
+    provider
+        .connect(
+          const SessionConfig(
+            sourceLanguage: 'en-US',
+            targetLanguage: 'fa-IR',
+            apiKey: 'test-key-value-123456',
+          ),
+        )
+        .listen(events.add);
+    await Future<void>.delayed(const Duration(milliseconds: 180));
+    expect(events.whereType<ProviderConnected>(), isEmpty);
+    expect(
+      events.whereType<ProviderError>().map((e) => e.code),
+      contains('connectionTimeout'),
+    );
     await provider.disconnect();
   });
 }

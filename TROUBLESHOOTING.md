@@ -12,7 +12,10 @@ docs/CI.md).
 | «سهمیه…» but the key works | quota exhausted for that key/project | `connectionOkQuota` | billing or another key; DOUBLER treats this as a working key |
 | «اتصال اینترنت…» | offline, DNS, VPN, firewall | `networkUnavailable` | the app talks to Google directly; there is no proxy to blame |
 | «پاسخ Google دیر رسید» | captive portal, slow TLS | `connectionTimeout` | retry from Settings → Gemini |
+| «در حال اتصال» forever | `setupComplete` was `{}` and ignored, or the socket never answered | `connectingGemini` then `connectionTimeout` | update; if it still times out, check the model in Settings → Gemini |
+| Capture dialog, then nothing | media-projection service was started before consent (Android 14+ kills that) | `awaitingCapture` then `captureFailed` / `playbackFallback` | allow the capture prompt; the service starts only after you accept |
 | WS opens then closes | wrong model id | `unsupportedModel` | Settings → Gemini → pick a listed Live model |
+| YouTube is silent | capture consent denied, or YouTube opted out of playback capture | `playbackDenied` / `playbackFallback` | allow capture, or use microphone + speaker |
 | No mic | permission denied | `micDenied` | system settings → microphone |
 | Silence / no dub | VAD, mic muted, source language `auto` on silence | — | check the status dot on the live screen |
 | Feedback howl | speaker + mic | — | headphones, or lower original voice |

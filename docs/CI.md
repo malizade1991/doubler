@@ -33,8 +33,21 @@ Flutter tool injects them from its cache and preserves the committed `gradle-wra
   build and would overwrite `app_localizations.dart` with a generated class that is missing 71+
   getters → the app stops compiling.
 - **Do NOT run `flutter gen-l10n` in CI or locally.**
+- **Do NOT add an `l10n.yaml` to the repo root.** Its mere presence makes `flutter analyze`
+  and `flutter pub get` attempt synthetic-package generation, which aborts with
+  `Attempted to generate localizations code without having the flutter: generate flag turned on`
+  and exit code 1 — even though nothing in the app needs generation. The sample config now
+  lives, inactive, at `docs/l10n.yaml.example`.
+
 On Flutter 3.29.x `synthetic-package` still defaults to `true`, and the pubspec has no
 `generate: true`, so today nothing is clobbered — keep it that way.
+
+## Release tags must start with `v`
+
+The workflow triggers on `tags: ["v*"]` and every release step is gated on
+`startsWith(github.ref, 'refs/tags/v')`. A tag like `1.0.0` (no `v`) does **not** trigger
+a build and does **not** publish — an earlier `1.0.0` tag produced a release with zero
+assets for exactly this reason. Always tag `vX.Y.Z`, matching `pubspec.yaml`.
 
 ## Required GitHub Secrets (release signing only)
 

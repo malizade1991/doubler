@@ -58,8 +58,7 @@ class HistoryDetailScreen extends ConsumerWidget {
           DoublerButton(
             label: l10n.exportTranscript,
             onPressed: () {
-              ref.read(transcriptControllerProvider.notifier)
-                ..startSession();
+              ref.read(transcriptControllerProvider.notifier).startSession();
               for (final seg in session.transcript) {
                 ref.read(transcriptControllerProvider.notifier)
                   ..addSource(seg.sourceText, isFinal: true)

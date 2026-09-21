@@ -13,7 +13,6 @@ import '../../../shared/widgets/audio_waveform.dart';
 import '../../../shared/widgets/doubler_button.dart';
 import '../../../shared/widgets/doubler_card.dart';
 import '../../../shared/widgets/doubler_slider.dart';
-import '../../../domain/models/subtitle_style.dart';
 import '../../../shared/widgets/mixed_direction_text.dart';
 import '../../../shared/widgets/subtitle_stage.dart';
 import '../../api_key/application/api_key_controller.dart';

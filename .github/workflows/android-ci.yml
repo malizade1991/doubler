@@ -22,9 +22,10 @@
 # `flutter_localizations` still pins `intl: 0.19.0` (required by `intl: ^0.19.0` in
 # pubspec) and whose Gradle/AGP validation matches AGP 8.7.0 / Gradle 8.10.2 here.
 #
-# IMPORTANT (l10n landmine): do NOT add `generate: true` to pubspec.yaml and do NOT
-# run `flutter gen-l10n` in CI. `lib/core/l10n/app_localizations.dart` is
-# hand-written; the ARB files are only source data. See docs/CI.md.
+# IMPORTANT (l10n landmine): do NOT add `generate: true` to pubspec.yaml, do NOT
+# run `flutter gen-l10n` in CI, and do NOT add an `l10n.yaml` at the repo root
+# (its presence alone makes `flutter analyze` fail). `lib/core/l10n/app_localizations.dart`
+# is hand-written; the ARB files are only source data. See docs/CI.md.
 
 name: Android CI / Release
 
@@ -81,14 +82,80 @@ jobs:
       - name: Flutter doctor (diagnostics)
         run: flutter doctor -v
 
+      - name: Guard — no root l10n.yaml (breaks analyze, see docs/CI.md)
+        run: |
+          if [ -f l10n.yaml ]; then
+            echo "::error file=l10n.yaml::A root l10n.yaml makes 'flutter analyze' attempt synthetic-package generation and fail. Keep the sample at docs/l10n.yaml.example."
+            exit 1
+          fi
+
       - name: Fetch dependencies
         run: flutter pub get
 
       - name: Static analysis
-        run: flutter analyze --fatal-infos --fatal-warnings
+        id: analyze
+        run: |
+          set -o pipefail
+          flutter analyze --fatal-infos --fatal-warnings 2>&1 | tee analyze.txt
+
+      # Mirror findings into the job summary AND as inline annotations, so they are
+      # readable without downloading raw logs (which need extra permissions/tooling).
+      - name: Publish analyzer findings
+        if: ${{ always() && steps.analyze.outcome == 'failure' }}
+        run: |
+          {
+            echo "### \`flutter analyze --fatal-infos --fatal-warnings\` findings"
+            echo
+            echo '```'
+            cat analyze.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Lines look like: "  info • Message here • lib/foo.dart:12:5 • rule_name"
+          sed -n 's/^[[:space:]]*\(info\|warning\|error\)[[:space:]]*•[[:space:]]*/\1•/p' analyze.txt |
+          while IFS= read -r line; do
+            sev="${line%%•*}"
+            rest="${line#*•}"
+            msg="$(printf '%s' "$rest" | awk -F' • ' '{print $1}')"
+            loc="$(printf '%s' "$rest" | awk -F' • ' '{print $2}')"
+            rule="$(printf '%s' "$rest" | awk -F' • ' '{print $3}')"
+            file="$(printf '%s' "$loc" | cut -d: -f1)"
+            ln="$(printf '%s' "$loc" | cut -d: -f2)"
+            col="$(printf '%s' "$loc" | cut -d: -f3)"
+            case "$sev" in
+              error) lvl=error ;;
+              warning) lvl=warning ;;
+              *) lvl=notice ;;
+            esac
+            echo "::${lvl} file=${file},line=${ln:-1},col=${col:-1},title=flutter analyze (${rule:-$sev})::${msg}"
+          done
 
       - name: Run tests
-        run: flutter test
+        id: tests
+        run: |
+          set -o pipefail
+          flutter test --reporter expanded 2>&1 | tee test.txt
+
+      - name: Publish test failures
+        if: ${{ always() && steps.tests.outcome == 'failure' }}
+        run: |
+          {
+            echo "### \`flutter test\` failures"
+            echo
+            echo '```'
+            grep -E '^(\[E\]|[[:space:]]*Expected:|[[:space:]]*Actual:|.*\[E\])|failed|Exception' test.txt | head -100 || tail -100 test.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Emit the failure text itself as annotations (readable via the checks API).
+          python3 -c "$TEST_ANNOTATE"
+        env:
+          TEST_ANNOTATE: |
+            lines = open('test.txt', errors='replace').read().splitlines()
+            idx = [i for i, l in enumerate(lines) if 'EXCEPTION CAUGHT' in l]
+            for i in idx[:20]:
+                block = [x.strip() for x in lines[i:i + 30] if x.strip()]
+                msg = ' | '.join(block)[:1200]
+                print('::error title=flutter test::' + msg.replace('%', '%25'))
 
   build:
     name: Build Android artifacts
@@ -140,6 +207,11 @@ jobs:
 
       - name: Enforce release signing on tag builds
         if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           missing=0
           for s in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
@@ -209,7 +281,11 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Tag pushes publish automatically. A manual run publishes only from a tag ref
+    # AND only when `run_release` is set (the input was previously dead config).
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') &&
+      (github.event_name != 'workflow_dispatch' || inputs.run_release)
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 15

@@ -18,6 +18,10 @@ void main() {
     await tester.pump();
     app = tester.widget<MaterialApp>(find.byType(MaterialApp));
     expect(app.themeMode, ThemeMode.dark);
+
+    // Let SplashScreen's navigation timer fire so no timer outlives the tree.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
   });
 
   test('default performance is balanced', () {

@@ -7,8 +7,7 @@ void main() {
       originalVolume: 1,
       dubbedVolume: 0.85,
       microphoneMode: true,
-      speaking: true,
-    );
+    )..speaking = true;
     expect(mixer.effectiveOriginalGain, 0);
     expect(mixer.effectiveDubbedGain, 0.85);
   });

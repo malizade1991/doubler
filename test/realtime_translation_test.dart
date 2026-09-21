@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:doubler/core/l10n/locale_controller.dart';
 import 'package:doubler/domain/models/translation_tone.dart';
 import 'package:doubler/domain/providers/translation_provider.dart';
 import 'package:doubler/features/api_key/application/api_key_controller.dart';

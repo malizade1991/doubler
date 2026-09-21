@@ -30,12 +30,22 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1000));
     await tester.pumpAndSettle();
 
-    expect(Directionality.of(tester.element(find.byType(MaterialApp))), TextDirection.rtl);
+    expect(
+      Directionality.of(tester.element(find.byType(Scaffold).first)),
+      TextDirection.rtl,
+    );
 
     final container = ProviderScope.containerOf(tester.element(find.byType(DoublerApp)));
     container.read(localeProvider.notifier).setLocale(const Locale('en'));
     await tester.pumpAndSettle();
-    expect(Directionality.of(tester.element(find.byType(MaterialApp))), TextDirection.ltr);
+    expect(
+      Directionality.of(tester.element(find.byType(Scaffold).first)),
+      TextDirection.ltr,
+    );
+
+    // Let SplashScreen's navigation timer fire so no timer outlives the tree.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
   });
 
   test('language route constant exists', () {

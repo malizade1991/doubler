@@ -13,6 +13,7 @@ void main() {
         child: DoublerApp(),
       ),
     );
+    await tester.pump();
 
     expect(find.text('DOUBLER'), findsWidgets);
 

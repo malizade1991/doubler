@@ -10,10 +10,8 @@ import '../../../infrastructure/audio/audio_capture.dart';
 import '../../../infrastructure/audio/audio_mixer.dart';
 import '../../../infrastructure/audio/audio_output.dart';
 import '../../../infrastructure/gemini/gemini_translation_provider.dart';
-import '../../../infrastructure/storage/secure_key_store.dart';
 import '../../api_key/application/api_key_controller.dart';
 import '../../history/application/history_controller.dart';
-import '../../settings/application/session_languages.dart';
 import '../../transcript/application/transcript_controller.dart';
 
 final translationProviderFactory = Provider<TranslationProvider>(

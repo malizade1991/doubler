@@ -30,10 +30,14 @@ on:
         required: false
         default: ""
         type: string
-  # When the verifier itself changes on main, re-verify the newest published
-  # release so a broken check is noticed immediately.
+  # When the verifier itself changes, re-verify the newest published release:
+  # in the PR that changes it (so the check is tested before merge) and again on
+  # main (so a broken check is noticed immediately). Read-only either way.
   push:
     branches: [main]
+    paths:
+      - ".github/workflows/verify-release.yml"
+  pull_request:
     paths:
       - ".github/workflows/verify-release.yml"
 
@@ -196,6 +200,17 @@ jobs:
             apk="dist/doubler-$TAG-$abi.apk"
             echo "=== $apk ==="
 
+            # Flutter's `--split-per-abi` stamps a per-ABI versionCode so Play can
+            # tell the splits apart: 1000 * ABI code + the app's build number,
+            # with armeabi-v7a=1, x86_64=2, arm64-v8a=4.
+            case "$abi" in
+              armeabi-v7a) abi_offset=1000 ;;
+              x86_64)      abi_offset=2000 ;;
+              arm64-v8a)   abi_offset=4000 ;;
+              *)           abi_offset=0 ;;
+            esac
+            expect_code=$(( EXPECT_CODE + abi_offset ))
+
             # 1) Container integrity — a truncated/mangled upload fails here.
             if ! unzip -t "$apk" >/dev/null; then
               echo "::error file=$apk::APK is not a valid zip archive."
@@ -208,7 +223,21 @@ jobs:
               cat apksigner.txt
               fail=1; continue
             fi
-            cert_dn="$(sed -n 's/^Signer #1 certificate DN: //p' apksigner.txt | head -1)"
+            echo "--- apksigner ---"; cat apksigner.txt
+            # The exact wording of this block has moved between build-tools
+            # releases, so read it tolerantly and keep the raw output above.
+            cert_dn="$(tr -d '\r' < apksigner.txt | sed -n 's/^[[:space:]]*Signer #1 certificate DN:[[:space:]]*//p' | head -1)"
+            if [ -z "$cert_dn" ]; then
+              cert_dn="$(tr -d '\r' < apksigner.txt | grep -i 'certificate DN' | head -1 | sed 's/^.*DN:[[:space:]]*//')"
+            fi
+            debug_signed=0
+            if printf '%s' "$cert_dn" | grep -qi 'android debug' || grep -qi 'android debug' apksigner.txt; then
+              debug_signed=1
+            fi
+            if [ -z "$cert_dn" ] && [ "$debug_signed" -eq 0 ]; then
+              echo "::error file=$apk::Could not read the signing certificate from apksigner output."
+              fail=1; continue
+            fi
             echo "cert DN: $cert_dn"
 
             # 3) Metadata as a device/Play would read it.
@@ -223,7 +252,10 @@ jobs:
 
             [ "$pkg" = "com.doubler.doubler" ] || { echo "::error file=$apk::Unexpected package '$pkg'."; fail=1; }
             [ "$vname" = "$EXPECT_NAME" ] || { echo "::error file=$apk::versionName '$vname' != expected '$EXPECT_NAME' for $TAG."; fail=1; }
-            [ "$vcode" = "$EXPECT_CODE" ] || { echo "::error file=$apk::versionCode '$vcode' != expected '$EXPECT_CODE' for $TAG."; fail=1; }
+            if [ "$vcode" != "$expect_code" ]; then
+              echo "::error file=$apk::versionCode '$vcode' != expected '$expect_code' for $abi (build number $EXPECT_CODE + Flutter's per-ABI offset $abi_offset)."
+              fail=1
+            fi
             printf '%s' "$native" | grep -q "$abi" || { echo "::error file=$apk::native-code '$native' does not match file ABI '$abi'."; fail=1; }
 
             # 4) The Flutter engine + AOT payload must be in the APK for that ABI.
@@ -232,23 +264,20 @@ jobs:
             done
 
             # 5) Debug-signed is fine for a QA pre-release and never for a real one.
-            case "$cert_dn" in
-              *"Android Debug"*)
-                if [ "${isPrerelease:-false}" != "true" ]; then
-                  echo "::error file=$apk::Release is published as a NORMAL release but the APK is debug-signed."
-                  fail=1
-                fi
-                sig="debug keystore (QA)"
-                ;;
-              *)
-                if [ "${isPrerelease:-false}" = "true" ]; then
-                  echo "::warning file=$apk::Published as a pre-release, yet signed with '$cert_dn'."
-                fi
-                sig="release keystore"
-                ;;
-            esac
+            if [ "$debug_signed" -eq 1 ]; then
+              if [ "${isPrerelease:-false}" != "true" ]; then
+                echo "::error file=$apk::Release is published as a NORMAL release but the APK is debug-signed."
+                fail=1
+              fi
+              sig="debug keystore (QA)"
+            else
+              if [ "${isPrerelease:-false}" = "true" ]; then
+                echo "::warning file=$apk::Published as a pre-release, yet signed with '$cert_dn'."
+              fi
+              sig="release keystore"
+            fi
 
-            echo "| \`$(basename "$apk")\` | $abi | $vname | $vcode | $sig | $minsdk | $targetsdk |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| \`$(basename "$apk")\` | $abi | $vname | $vcode (expected $expect_code) | $sig | $minsdk | $targetsdk |" >> "$GITHUB_STEP_SUMMARY"
           done
           [ "$fail" -eq 0 ] || exit 1
           echo "All three split-per-ABI APKs verify."
@@ -258,12 +287,23 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.tag.outputs.tag }}"
           aab="dist/doubler-$TAG.aab"
+          EXPECT_NAME="${{ steps.ver.outputs.name }}"
           unzip -t "$aab" >/dev/null
           for entry in "base/manifest/AndroidManifest.xml" "BundleConfig.pb" "base/dex/classes.dex" "base/resources.pb"; do
             unzip -l "$aab" "$entry" >/dev/null 2>&1 || { echo "::error file=$aab::Missing bundle entry $entry."; exit 1; }
           done
+          # The bundle's manifest is protobuf-encoded, so aapt cannot read it here.
+          # The package and version still live in its string table: that is enough
+          # to prove the bundle carries the same stamp as the APKs.
+          unzip -p "$aab" base/manifest/AndroidManifest.xml > aab-manifest.pb
+          for needle in "com.doubler.doubler" "$EXPECT_NAME"; do
+            if ! strings aab-manifest.pb | grep -qF "$needle"; then
+              echo "::error file=$aab::Bundle manifest does not carry '$needle'."
+              exit 1
+            fi
+          done
           size="$(stat -c %s "$aab")"
-          echo "AAB is a valid bundle ($size bytes) with a base module manifest, dex and resources."
+          echo "AAB is a valid bundle ($size bytes): base module, dex, resources, package and version $EXPECT_NAME present."
           {
             echo
             echo "App Bundle \`$(basename "$aab")\`: valid bundle, base module present, ${size} bytes."

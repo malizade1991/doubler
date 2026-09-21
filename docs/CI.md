@@ -153,15 +153,20 @@ downloader gets is a valid, installable, correctly-versioned artifact *for that 
 | asset set complete, no strays, not a draft | `gh release view` | an APK/AAB for the tag is missing or the release never left draft |
 | container integrity | `unzip -t` | a truncated/mangled upload |
 | installable signature | `apksigner verify --print-certs` | unsigned, or the cert contradicts the release's `prerelease` flag (debug keystore on a **normal** release) |
-| `versionName` / `versionCode` match the tag + `pubspec.yaml` at that tag | `aapt dump badging` | a mis-stamped build going public |
+| `versionName` matches the tag + `pubspec.yaml` at that tag, and `versionCode` is the build number plus Flutter's per-ABI offset (`1000 × ABI code`: armeabi-v7a 1, x86_64 2, arm64-v8a 4 — `--split-per-abi` stamps each split so Play can tell them apart) | `aapt dump badging` | a mis-stamped build going public |
 | each `-<abi>.apk` really declares that `native-code` and ships `lib/<abi>/libflutter.so`, `lib/<abi>/libapp.so` | `aapt` + `unzip` | an ABI mix-up |
 | AAB has `base/manifest/AndroidManifest.xml`, `BundleConfig.pb`, dex, `resources.pb` | `unzip` | a broken bundle for Play |
 
-It triggers on every `release: published` (so `vX.Y.Z` is verified automatically) and on demand:
+It triggers on every `release: published` (so `vX.Y.Z` is verified automatically), on demand, and
+whenever the verifier itself changes (in the PR that changes it, and again on `main`) — so the
+check is tested against a real release before it is trusted:
 
 ```bash
-gh workflow run verify-release.yml -f tag=vX.Y.Z   # empty tag = latest release
+gh workflow run verify-release.yml -f tag=vX.Y.Z   # empty tag = newest published release
 ```
+
+> Note: the tag resolves to the newest published release when none is given, because `gh release
+> view` only knows a "latest" release once at least one published release is **not** a pre-release.
 
 A red run means the published release is wrong — fix it before anyone hands the APK out. It only
 reads; it never edits or deletes a release.

@@ -22,6 +22,35 @@ void main() {
     expect(GeminiConfig.authHeaders('SECRETKEY')['x-goog-api-key'], 'SECRETKEY');
   });
 
+  test('classifyError ignores digits that belong to the redacted key', () {
+    // Without redaction the key's own "401" is misread as an HTTP 401
+    // (bad key). With the endpoint's secret stripped first, the same error
+    // is reported as a transport problem, not a key problem.
+    const key = 'key-401-value';
+    final error = 'rejected by proxy: $key';
+    expect(IoGeminiSocket.classifyError(error), 'keyInvalid');
+    expect(
+      IoGeminiSocket.classifyError(error, redact: [key]),
+      'geminiUnavailable',
+    );
+  });
+
+  test('statusCodeOf skips digits inside a redacted key', () {
+    const key = 'key-401-value';
+    final error = 'rejected by proxy: $key';
+    expect(IoGeminiSocket.statusCodeOf(error), 401);
+    expect(IoGeminiSocket.statusCodeOf(error, redact: [key]), isNull);
+  });
+
+  test('a FakeGeminiSocket reports its close code only after closing', () {
+    final fake = FakeGeminiSocket();
+    expect(fake.closeCode, isNull);
+    expect(fake.closeReason, isNull);
+    fake.close(1008, 'policy');
+    expect(fake.closeCode, 1008);
+    expect(fake.closeReason, 'policy');
+  });
+
   test('error mapper', () {
     expect(GeminiErrorMapper.fromCloseCode(403, 'invalid api key'), 'keyInvalid');
     expect(GeminiErrorMapper.fromCloseCode(429, 'quota'), 'quotaExceeded');

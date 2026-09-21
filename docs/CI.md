@@ -42,6 +42,13 @@ Flutter tool injects them from its cache and preserves the committed `gradle-wra
 On Flutter 3.29.x `synthetic-package` still defaults to `true`, and the pubspec has no
 `generate: true`, so today nothing is clobbered — keep it that way.
 
+## Release tags must start with `v`
+
+The workflow triggers on `tags: ["v*"]` and every release step is gated on
+`startsWith(github.ref, 'refs/tags/v')`. A tag like `1.0.0` (no `v`) does **not** trigger
+a build and does **not** publish — an earlier `1.0.0` tag produced a release with zero
+assets for exactly this reason. Always tag `vX.Y.Z`, matching `pubspec.yaml`.
+
 ## Required GitHub Secrets (release signing only)
 
 PR/branch builds need **no secrets**. Publishing a tag release requires all four:

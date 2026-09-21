@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import '../../core/errors/app_failure.dart';
+import 'gemini_config.dart';
 import 'gemini_error_mapper.dart';
 
 /// Where and how to open the Live socket. [headers] carries the API key
@@ -33,18 +34,19 @@ class IoGeminiSocket implements GeminiSocket {
   final WebSocket _socket;
 
   static Future<GeminiSocket> connect(GeminiLiveEndpoint endpoint) async {
+    final redact = _secrets(endpoint);
     try {
       return await _connectOnce(endpoint);
     } on Object catch (error) {
       // A rejected upgrade that included `x-goog-api-key` is retried with the
       // documented `?key=` query alone. Some fronts accept only one of the two.
       if (endpoint.headers.isEmpty) {
-        throw _asFailure(error);
+        throw _asFailure(error, redact);
       }
       try {
         return await _connectOnce(GeminiLiveEndpoint(uri: endpoint.uri));
       } on Object {
-        throw _asFailure(error);
+        throw _asFailure(error, redact);
       }
     }
   }
@@ -57,23 +59,47 @@ class IoGeminiSocket implements GeminiSocket {
     return IoGeminiSocket(socket);
   }
 
-  static AppFailure _asFailure(Object error) {
+  static AppFailure _asFailure(Object error, List<String> redact) {
     if (error is AppFailure) {
       return error;
     }
     return AppFailure(
-      code: classifyError(error),
-      message: describeError(error),
+      code: classifyError(error, redact: redact),
+      message: describeError(error, redact: redact),
     );
+  }
+
+  /// Every secret the endpoint carries: the `x-goog-api-key` header and the
+  /// documented `?key=` query parameter.
+  static List<String> _secrets(GeminiLiveEndpoint endpoint) {
+    final secrets = <String>[];
+    final header = endpoint.headers[GeminiConfig.apiKeyHeader];
+    if (header != null && header.isNotEmpty) {
+      secrets.add(header);
+    }
+    final query = endpoint.uri.queryParameters['key'];
+    if (query != null && query.isNotEmpty) {
+      secrets.add(query);
+    }
+    return secrets;
+  }
+
+  /// Strips [secrets] from [text] before anything is classified or logged, so
+  /// a token that happens to contain "401" cannot be classified from its own
+  /// characters, and so the key never reaches a log.
+  static String _redact(String text, List<String> secrets) {
+    var redacted = text;
+    for (final secret in secrets) {
+      redacted = redacted.replaceAll(secret, 'REDACTED');
+    }
+    return redacted;
   }
 
   /// A rejected HTTP upgrade means the key (or the model) is the problem;
   /// anything else is transport. Best-effort: dart:io only gives us a string.
-  /// The key is stripped first so a token that happens to contain "401" cannot
-  /// be classified from its own characters, and so it never reaches a log.
-  static String classifyError(Object error) {
-    final text = _redact(error.toString()).toLowerCase();
-    final status = statusCodeOf(error);
+  static String classifyError(Object error, {List<String> redact = const []}) {
+    final text = _redact(error.toString(), redact).toLowerCase();
+    final status = statusCodeOf(error, redact: redact);
     if (status != null) {
       return GeminiErrorMapper.fromHttpStatus(status);
     }
@@ -86,16 +112,18 @@ class IoGeminiSocket implements GeminiSocket {
     return 'geminiUnavailable';
   }
 
-  static int? statusCodeOf(Object error) {
-    final match = RegExp(r'\b(4\d\d|5\d\d)\b').firstMatch(error.toString());
+  static int? statusCodeOf(Object error, {List<String> redact = const []}) {
+    final match = RegExp(
+      r'\b(4\d\d|5\d\d)\b',
+    ).firstMatch(_redact(error.toString(), redact));
     if (match == null) {
       return null;
     }
     return int.tryParse(match.group(0)!);
   }
 
-  static String? describeError(Object error) {
-    final status = statusCodeOf(error);
+  static String? describeError(Object error, {List<String> redact = const []}) {
+    final status = statusCodeOf(error, redact: redact);
     return status == null ? null : 'HTTP $status';
   }
 
@@ -121,6 +149,7 @@ class FakeGeminiSocket implements GeminiSocket {
   final _controller = StreamController<dynamic>.broadcast();
   final List<String> sent = [];
   int? closedCode;
+  String? closedReason;
   bool closed = false;
 
   void emit(dynamic message) => _controller.add(message);
@@ -137,6 +166,13 @@ class FakeGeminiSocket implements GeminiSocket {
   Future<void> close([int? code, String? reason]) async {
     closed = true;
     closedCode = code;
+    closedReason = reason;
     await _controller.close();
   }
+
+  @override
+  int? get closeCode => closed ? closedCode : null;
+
+  @override
+  String? get closeReason => closed ? closedReason : null;
 }

@@ -114,7 +114,6 @@ class DubbingController extends Notifier<DubbingUiState> {
   DateTime? _lastMicAt;
   DateTime? _sessionStarted;
   bool _awaitingFirstAudio = false;
-  bool _wentLive = false;
 
   @override
   DubbingUiState build() {
@@ -145,7 +144,6 @@ class DubbingController extends Notifier<DubbingUiState> {
       source: requested,
     );
     _sessionStarted = DateTime.now();
-    _wentLive = false;
     ref.read(transcriptControllerProvider.notifier).startSession();
 
     final capture = ref.read(audioCaptureProvider);
@@ -242,7 +240,6 @@ class DubbingController extends Notifier<DubbingUiState> {
   void _onEvent(ProviderEvent event) {
     switch (event) {
       case ProviderConnected():
-        _wentLive = true;
         state = state.copyWith(
           phase: DubbingPhase.live,
           capturing: true,

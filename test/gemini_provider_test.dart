@@ -27,7 +27,7 @@ void main() {
     // (bad key). With the endpoint's secret stripped first, the same error
     // is reported as a transport problem, not a key problem.
     const key = 'key-401-value';
-    final error = 'rejected by proxy: $key';
+    const error = 'rejected by proxy: $key';
     expect(IoGeminiSocket.classifyError(error), 'keyInvalid');
     expect(
       IoGeminiSocket.classifyError(error, redact: [key]),
@@ -37,7 +37,7 @@ void main() {
 
   test('statusCodeOf skips digits inside a redacted key', () {
     const key = 'key-401-value';
-    final error = 'rejected by proxy: $key';
+    const error = 'rejected by proxy: $key';
     expect(IoGeminiSocket.statusCodeOf(error), 401);
     expect(IoGeminiSocket.statusCodeOf(error, redact: [key]), isNull);
   });

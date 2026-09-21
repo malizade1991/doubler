@@ -30,6 +30,12 @@ on:
         required: false
         default: ""
         type: string
+  # When the verifier itself changes on main, re-verify the newest published
+  # release so a broken check is noticed immediately.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/verify-release.yml"
 
 permissions:
   contents: read
@@ -45,6 +51,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The version check reads `pubspec.yaml` *at the tag*, so the tag has to
+          # exist locally — a shallow single-ref checkout does not guarantee that.
+          fetch-depth: 0
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -63,7 +73,19 @@ jobs:
             TAG="${{ github.event.release.tag_name }}"
           fi
           if [ -z "$TAG" ]; then
-            TAG="$(gh release view --json tagName --jq .tagName)"
+            # `gh release view` resolves the "latest" release, which GitHub only
+            # defines when at least one published release is not a pre-release —
+            # with every release still an unsigned QA pre-release there is none,
+            # so fall back to the newest published (non-draft) release.
+            TAG="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            TAG="$(gh release list --limit 100 --json tagName,isDraft \
+              --jq '[.[] | select(.isDraft | not)][0].tagName // empty')"
+          fi
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "::error::No published release found to verify."
+            exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Verifying release: $TAG"

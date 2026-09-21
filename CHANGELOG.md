@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.0
+
+Public release — first version published with built Android artifacts.
 
 ### Fixed
 

@@ -39,6 +39,13 @@ class DoublerApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       routerConfig: appRouter,
+      // Persian text at 2× system scale breaks every layout in the app; clamp
+      // it so the live screen stays usable for low-vision users.
+      builder: (context, child) => MediaQuery.withClampedTextScaling(
+        minScaleFactor: 0.9,
+        maxScaleFactor: 1.35,
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
   }
 }

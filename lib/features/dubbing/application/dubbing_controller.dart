@@ -135,6 +135,7 @@ class DubbingController extends Notifier<DubbingUiState> {
             targetLanguage: target,
             tone: tone.id,
             voiceId: ref.read(voiceIdProvider),
+            model: ref.read(geminiModelProvider),
             apiKey: key,
           ),
         )

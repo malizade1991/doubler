@@ -12,4 +12,5 @@ abstract final class AppRadii {
     top: Radius.circular(lg),
   );
   static const BorderRadius input = BorderRadius.all(Radius.circular(sm));
+  static const BorderRadius pillShape = BorderRadius.all(Radius.circular(pill));
 }

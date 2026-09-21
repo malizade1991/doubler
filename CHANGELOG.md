@@ -1,5 +1,41 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Valid Gemini keys were rejected as invalid.** `ApiKeyValidator` only allowed
+  `[A-Za-z0-9_-]`, so Google's current auth keys (`AQ.…`, which contain a dot) failed the
+  format check before anything was sent. Validation is now shape-agnostic (sanitize →
+  length → character set) and Google's answer is what decides. Legacy `AIza…` keys are still
+  saved but flagged as legacy; malformed pastes (quotes, `x-goog-api-key:` labels, `?key=`
+  prefixes, newlines, zero-width marks) are cleaned instead of rejected.
+- **Key check and Live socket auth.** REST now uses the `x-goog-api-key` header (a `?key=`
+  request 404s for auth keys); the WebSocket sends the header and the documented `?key=`
+  parameter, and a 429 is reported as "key works, quota spent" rather than "invalid key".
+- **Dead default model.** The Live model id moved from the retired
+  `gemini-2.5-flash-native-audio-preview-*` to `gemini-3.8-live`, selectable in
+  Settings → Gemini if Google renames it again.
+- **Controls behind the system safe area.** Every screen now goes through
+  `DoublerScaffold`/`DoublerPage`, which apply `MediaQuery` insets (top notch, bottom
+  gesture bar) and keep the pinned action row clear of the keyboard.
+- Weak UI/UX across the app: single hero action on Home instead of a wall of identical
+  cards, 48dp touch targets everywhere, real empty/busy/error states, inline key-test
+  feedback, a live subtitle stage, mute + mic controls reachable in one thumb zone,
+  confirmations on destructive actions, sliders with labelled targets, colour/position
+  subtitle picker with a preview, and Persian fallback strings that were mojibake-fixed.
+- Missing platform launch theme: added `values-night/styles.xml` + `launch_background`
+  colors so a cold start no longer flashes white over the dark theme.
+
+### Changed
+
+- Localizable strings: ~100 new keys in `fa` and `en`; partial locales now fall back to
+  English before Persian.
+- History, transcript and export screens rebuilt on the shared widgets; export renders the
+  file immediately (TXT/SRT/JSON, bilingual toggle) and copies it — no server, no share
+  plugin dependency.
+- Tests cover the new key shapes, header/query auth, quota handling and setup-gated audio.
+
 ## 0.1.0
 
 - Client-side Flutter shell (Android + iOS project files)

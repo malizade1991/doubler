@@ -8,7 +8,9 @@ To add a **UI** language: add a code to `LanguageCatalog.uiLanguageCodes` and a 
 
 To add a **translation** language: add a `Language` to `LanguageCatalog.all`.
 
-- Tooling: `flutter gen-l10n` (planned, currently disabled — see `docs/l10n.yaml.example`), ARB files in `lib/core/l10n`
+- Tooling: `flutter gen-l10n` is **disabled and must stay disabled** — `lib/core/l10n/app_localizations.dart`
+  is hand-written and would be overwritten; CI fails if a root `l10n.yaml` or `generate: true` appears
+  (see `docs/CI.md`). `docs/l10n.yaml.example` is documentation only.
 - Template: `app_fa.arb` (source) + `app_en.arb` etc.
 - Access: `AppLocalizations.of(context).startLiveDubbing`
 - Never `Text("Settings")` in product UI

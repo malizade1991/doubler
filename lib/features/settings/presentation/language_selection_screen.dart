@@ -6,7 +6,9 @@ import '../../../core/l10n/locale_controller.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../domain/models/language.dart';
 import '../../../domain/models/language_catalog.dart';
+import '../../../shared/widgets/doubler_button.dart';
 import '../../../shared/widgets/doubler_card.dart';
+import '../../../shared/widgets/doubler_scaffold.dart';
 import '../../../shared/widgets/mixed_direction_text.dart';
 
 class LanguageSelectionScreen extends ConsumerWidget {
@@ -19,29 +21,45 @@ class LanguageSelectionScreen extends ConsumerWidget {
     final source = ref.watch(sourceLanguageCodeProvider);
     final target = ref.watch(targetLanguageCodeProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: Text(l10n.languageSelection)),
-      body: ListView(
-        padding: AppSpacing.page,
+    return DoublerScaffold(
+      title: l10n.languageSelection,
+      actions: [
+        IconButton(
+          tooltip: l10n.swapLanguages,
+          onPressed: () {
+            if (source == 'auto') {
+              return;
+            }
+            ref.read(sourceLanguageCodeProvider.notifier).state = target;
+            ref.read(targetLanguageCodeProvider.notifier).state = source;
+          },
+          icon: const Icon(Icons.swap_horiz),
+        ),
+      ],
+      body: DoublerPage(
         children: [
-          Text(l10n.uiLanguage, style: Theme.of(context).textTheme.titleMedium),
+          DoublerSectionHeader(label: l10n.uiLanguage, topGap: 0),
+          Text(
+            l10n.uiLanguageHint,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+          ),
           const SizedBox(height: AppSpacing.sm),
           Wrap(
             spacing: AppSpacing.xs,
             runSpacing: AppSpacing.xs,
             children: [
               for (final code in LanguageCatalog.uiLanguageCodes)
-                ChoiceChip(
-                  label: Text(code),
+                DoublerChoicePill(
+                  label: LanguageCatalog.byCode(code).nativeName,
                   selected: ui.languageCode == code,
-                  onSelected: (_) =>
+                  onSelected: () =>
                       ref.read(localeProvider.notifier).setLocale(Locale(code)),
                 ),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Text(l10n.sourceLanguage, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: AppSpacing.sm),
+          DoublerSectionHeader(label: l10n.sourceLanguage),
           _LanguageList(
             languages: LanguageCatalog.inputs,
             selectedCode: source,
@@ -49,9 +67,7 @@ class LanguageSelectionScreen extends ConsumerWidget {
             onSelect: (lang) =>
                 ref.read(sourceLanguageCodeProvider.notifier).state = lang.code,
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Text(l10n.targetLanguage, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: AppSpacing.sm),
+          DoublerSectionHeader(label: l10n.targetLanguage),
           _LanguageList(
             languages: LanguageCatalog.outputs,
             selectedCode: target,
@@ -59,9 +75,7 @@ class LanguageSelectionScreen extends ConsumerWidget {
             onSelect: (lang) =>
                 ref.read(targetLanguageCodeProvider.notifier).state = lang.code,
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Text(l10n.mixedSampleLabel, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: AppSpacing.sm),
+          DoublerSectionHeader(label: l10n.mixedSampleLabel),
           DoublerCard(
             child: MixedDirectionText(
               text: l10n.mixedSample,
@@ -94,22 +108,22 @@ class _LanguageList extends StatelessWidget {
         for (final lang in languages)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-            child: DoublerCard(
+            child: DoublerTile(
               onTap: () => onSelect(lang),
-              child: Row(
-                children: [
-                  Text(lang.flag),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Text(
-                      lang.code == 'auto' ? autoLabel : lang.nativeName,
-                      textDirection: lang.textDirection,
-                    ),
-                  ),
-                  if (lang.code == selectedCode)
-                    Icon(Icons.check, color: Theme.of(context).colorScheme.primary),
-                ],
+              selected: lang.code == selectedCode,
+              title: lang.code == 'auto' ? autoLabel : lang.nativeName,
+              subtitle: lang.code == 'auto' ? null : lang.code,
+              leading: Text(
+                lang.flag,
+                style: const TextStyle(fontSize: 22),
               ),
+              trailing: lang.isRtl
+                  ? Icon(
+                      Icons.format_textdirection_r_to_l,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    )
+                  : null,
             ),
           ),
       ],

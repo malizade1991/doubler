@@ -18,6 +18,7 @@ class SessionConfig {
     this.tone = 'natural',
     this.voiceId,
     this.apiKey,
+    this.model,
   });
 
   final String sourceLanguage;
@@ -28,6 +29,9 @@ class SessionConfig {
   /// Never logged. Passed only into the provider.
   final String? apiKey;
 
+  /// Live API model id (e.g. `gemini-3.8-live`); null means provider default.
+  final String? model;
+
   SessionConfig merge(SessionConfig patch) {
     return SessionConfig(
       sourceLanguage: patch.sourceLanguage,
@@ -35,6 +39,7 @@ class SessionConfig {
       tone: patch.tone,
       voiceId: patch.voiceId ?? voiceId,
       apiKey: patch.apiKey ?? apiKey,
+      model: patch.model ?? model,
     );
   }
 }

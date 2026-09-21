@@ -23,7 +23,19 @@ class AppLocalizations {
   String _t(String key) {
     final code = locale.languageCode;
     final table = kL10nTables[code] ?? kL10nTables['fa']!;
-    return table[key] ?? kL10nTables['fa']![key] ?? key;
+    final value = table[key];
+    if (value != null) {
+      return value;
+    }
+    // Partial locales (ru, ar, zh, …) fall back to English first: a Russian
+    // user reading a Persian string is not a fallback, it is a bug.
+    if (code != 'fa') {
+      final english = kL10nTables['en']![key];
+      if (english != null) {
+        return english;
+      }
+    }
+    return kL10nTables['fa']![key] ?? key;
   }
 
   String get appName => _t('appName');
@@ -125,6 +137,108 @@ class AppLocalizations {
   String get clearAllData => _t('clearAllData');
   String get aboutBody => _t('aboutBody');
   String get offlineNote => _t('offlineNote');
+
+  String get allDataCleared => _t('allDataCleared');
+  String get appSection => _t('appSection');
+  String get authHeaderLabel => _t('authHeaderLabel');
+  String get bilingualHint => _t('bilingualHint');
+  String get cancel => _t('cancel');
+  String get clear => _t('clear');
+  String get clearField => _t('clearField');
+  String get colorAmber => _t('colorAmber');
+  String get colorBlack => _t('colorBlack');
+  String get colorDeepTeal => _t('colorDeepTeal');
+  String get colorFrost => _t('colorFrost');
+  String get colorInk => _t('colorInk');
+  String get colorNone => _t('colorNone');
+  String get colorTeal => _t('colorTeal');
+  String get colorWhite => _t('colorWhite');
+  String get confirm => _t('confirm');
+  String get confirmClearAllBody => _t('confirmClearAllBody');
+  String get confirmClearHistoryBody => _t('confirmClearHistoryBody');
+  String get confirmDeleteKeyBody => _t('confirmDeleteKeyBody');
+  String get confirmDeleteSessionBody => _t('confirmDeleteSessionBody');
+  String get connectionLabel => _t('connectionLabel');
+  String get connectionOk => _t('connectionOk');
+  String get connectionOkQuota => _t('connectionOkQuota');
+  String get connectionTimeout => _t('connectionTimeout');
+  String get continueToHome => _t('continueToHome');
+  String get data => _t('data');
+  String get duckingOn => _t('duckingOn');
+  String get endpointLabel => _t('endpointLabel');
+  String get engineSummary => _t('engineSummary');
+  String get exportEmpty => _t('exportEmpty');
+  String get exportEmptyHint => _t('exportEmptyHint');
+  String get exportFormat => _t('exportFormat');
+  String get exportRefresh => _t('exportRefresh');
+  String get exportSegments => _t('exportSegments');
+  String get geminiConfigNote => _t('geminiConfigNote');
+  String get headphonesNote => _t('headphonesNote');
+  String get helpBackgroundBody => _t('helpBackgroundBody');
+  String get helpBackgroundTitle => _t('helpBackgroundTitle');
+  String get helpFeedbackBody => _t('helpFeedbackBody');
+  String get helpFeedbackTitle => _t('helpFeedbackTitle');
+  String get helpKeyBody => _t('helpKeyBody');
+  String get helpKeyTitle => _t('helpKeyTitle');
+  String get helpLanguageNote => _t('helpLanguageNote');
+  String get helpNetworkBody => _t('helpNetworkBody');
+  String get helpNetworkTitle => _t('helpNetworkTitle');
+  String get helpSilenceBody => _t('helpSilenceBody');
+  String get helpSilenceTitle => _t('helpSilenceTitle');
+  String get historyCleared => _t('historyCleared');
+  String get historyEmptyHint => _t('historyEmptyHint');
+  String get historyMissingHint => _t('historyMissingHint');
+  String get homeNeedsKeyHint => _t('homeNeedsKeyHint');
+  String get homeReadyHint => _t('homeReadyHint');
+  String get keyConsoleLabel => _t('keyConsoleLabel');
+  String get keyDeleted => _t('keyDeleted');
+  String get keyHowToTitle => _t('keyHowToTitle');
+  String get keyKindAny => _t('keyKindAny');
+  String get keyKindAuth => _t('keyKindAuth');
+  String get keyLegacyRejected => _t('keyLegacyRejected');
+  String get keyNeverLeaves => _t('keyNeverLeaves');
+  String get keyPasteNote => _t('keyPasteNote');
+  String get keySaved => _t('keySaved');
+  String get keyStepOne => _t('keyStepOne');
+  String get keyStepThree => _t('keyStepThree');
+  String get keyStepTwo => _t('keyStepTwo');
+  String get keyWarningLegacy => _t('keyWarningLegacy');
+  String get keyWarningShape => _t('keyWarningShape');
+  String get levels => _t('levels');
+  String get mixingControls => _t('mixingControls');
+  String get modelLabel => _t('modelLabel');
+  String get muteMic => _t('muteMic');
+  String get networkRequiredNote => _t('networkRequiredNote');
+  String get networkUnavailable => _t('networkUnavailable');
+  String get outputRouting => _t('outputRouting');
+  String get outputRoutingNote => _t('outputRoutingNote');
+  String get paste => _t('paste');
+  String get previewEmpty => _t('previewEmpty');
+  String get previewLabel => _t('previewLabel');
+  String get privacyErase => _t('privacyErase');
+  String get privacyFooter => _t('privacyFooter');
+  String get privacyKey => _t('privacyKey');
+  String get privacyMic => _t('privacyMic');
+  String get privacyNoServer => _t('privacyNoServer');
+  String get quickActions => _t('quickActions');
+  String get session => _t('session');
+  String get sessionCompleted => _t('sessionCompleted');
+  String get sessionError => _t('sessionError');
+  String get sessionIdle => _t('sessionIdle');
+  String get sessionInterrupted => _t('sessionInterrupted');
+  String get setupSection => _t('setupSection');
+  String get skip => _t('skip');
+  String get smartDuckingHint => _t('smartDuckingHint');
+  String get subtitlePreview => _t('subtitlePreview');
+  String get swapLanguages => _t('swapLanguages');
+  String get transcriptEmpty => _t('transcriptEmpty');
+  String get transcriptEmptyHint => _t('transcriptEmptyHint');
+  String get transport => _t('transport');
+  String get tryAgain => _t('tryAgain');
+  String get uiLanguageHint => _t('uiLanguageHint');
+  String get unmuteMic => _t('unmuteMic');
+  String get unsupportedModel => _t('unsupportedModel');
+  String get versionLabel => _t('versionLabel');
 
   String message(String? code) {
     if (code == null || code.isEmpty) {

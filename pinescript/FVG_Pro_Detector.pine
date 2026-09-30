@@ -131,11 +131,11 @@ mitigate_zone(FvgZone z) =>
         box.set_right(z.bx, bar_index)
         if not na(z.ce_ln)
             line.set_extend(z.ce_ln, extend.none)
-            line.set_right(z.ce_ln, bar_index)
+            line.set_x2(z.ce_ln, bar_index)
     else if bar_index < box.get_right(z.bx)
         box.set_right(z.bx, bar_index)
         if not na(z.ce_ln)
-            line.set_right(z.ce_ln, bar_index)
+            line.set_x2(z.ce_ln, bar_index)
 
 create_zone(bool is_bull) =>
     float top   = is_bull ? low : low[2]

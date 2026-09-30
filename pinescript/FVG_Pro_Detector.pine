@@ -1,0 +1,282 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════
+//  FVG Pro Detector (FxBax.com) — نسخه کامل و حرفه‌ای
+//  ─────────────────────────────────────────────────────────────────────────
+//  Features / امکانات:
+//   • 3-candle FVG detection (bullish / bearish)      تشخیص گپ سه‌کندلی صعودی/نزولی
+//   • Size threshold: percent / ticks / none          حداقل اندازه گپ (درصد/تیک/بدون فیلتر)
+//   • Displacement filter (middle candle strength)    فیلتر قدرت کندل وسط (جابجایی)
+//   • Optional aligned-candles mode (original logic)  حالت هم‌جهتی سه کندل (منطق اسکریپت اصلی)
+//   • Session filter                                  فیلتر بازه زمانی معاملاتی
+//   • Auto-extending zones (until mitigated)          تمدید خودکار ناحیه تا میتیگیت شدن
+//   • CE (Consequent Encroachment) 50% midline        خط میانه ۵۰ درصد هر ناحیه
+//   • Mitigation tracking (touch / close / CE)        ثبت میتیگیشن با سه روش
+//   • Full-fill detection                             تشخیص پر شدن کامل گپ
+//   • Inverse FVG (IFVG) after body close-through     معکوس شدن ناحیه به IFVG پس از شکست با بدنه
+//   • Stats table + alerts + plotshapes               جدول آمار، هشدارها و فلش تشخیص
+// ═══════════════════════════════════════════════════════════════════════════
+indicator("FVG Pro Detector (FxBax.com)", shorttitle = "FVG Pro", overlay = true, max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ──────────────────────────── Inputs: Detection ────────────────────────────
+grp_det         = "Detection"
+fvg_threshold   = input.float(0.5, "FVG Threshold (%)", minval = 0.0, step = 0.1, group = grp_det, tooltip = "حداقل اندازه گپ به درصد قیمت. عدد ۰ یعنی تشخیص هر گپی.")
+thr_mode        = input.string("Percent (%)", "Threshold Mode", options = ["Percent (%)", "Ticks", "None"], group = grp_det, tooltip = "روش سنجش حداقل اندازه گپ")
+thr_ticks       = input.int(5, "Threshold (Ticks)", minval = 1, group = grp_det)
+require_aligned = input.bool(false, "Require 3 Aligned Candles (original logic)", group = grp_det, tooltip = "منطق اسکریپت اصلی: هر سه کندل باید هم‌جهت باشند")
+body_ratio_min  = input.float(0.0, "Displacement: Min Middle Body", minval = 0.0, maxval = 1.0, step = 0.05, group = grp_det, tooltip = "حداقل نسبت بدنه به دامنه کندل وسط (کندل جابجایی). ۰ یعنی غیرفعال")
+use_session     = input.bool(false, "Filter by Session", group = grp_det)
+sess            = input.session("0000-2359", "Session", group = grp_det, tooltip = "فقط گپ‌های تشکیل‌شده در این بازه زمانی")
+
+// ──────────────────────────── Inputs: Display ──────────────────────────────
+grp_disp    = "Display"
+col_bull    = input.color(color.new(#965ba5, 80), "Bullish FVG", group = grp_disp)
+col_bear    = input.color(color.new(#ffd60a, 78), "Bearish FVG", group = grp_disp)
+col_mit     = input.color(color.new(#9598a1, 88), "Mitigated / Filled", group = grp_disp)
+col_ifvg    = input.color(color.new(#ff9100, 75), "Inverse FVG (IFVG)", group = grp_disp)
+show_ce     = input.bool(true, "Show CE (50% Midline)", group = grp_disp, tooltip = "خط میانه هر ناحیه — Consequent Encroachment")
+show_shapes = input.bool(true, "Show Detection Arrows", group = grp_disp)
+show_label  = input.bool(false, "Show Zone Label (size in ticks)", group = grp_disp)
+max_zones   = input.int(40, "Max Active Zones", minval = 1, maxval = 200, group = grp_disp, tooltip = "حداکثر تعداد ناحیه‌های همزمان روی نمودار (قدیمی‌ترین حذف می‌شود)")
+show_table  = input.bool(true, "Show Stats Table", group = grp_disp)
+
+// ─────────────────────────── Inputs: Extension ─────────────────────────────
+grp_ext  = "Extension"
+ext_mode = input.string("Until mitigated", "Extend Zones", options = ["Until mitigated", "Fixed bars"], group = grp_ext, tooltip = "تمدید ناحیه تا زمان میتیگیت شدن، یا به تعداد کندل ثابت")
+ext_bars = input.int(50, "Fixed Extension (bars)", minval = 1, group = grp_ext)
+
+// ────────────────────── Inputs: Mitigation & Inversion ─────────────────────
+grp_mit          = "Mitigation & Inversion"
+track_mitigation = input.bool(true, "Track Mitigation", group = grp_mit)
+mit_mode         = input.string("Touch (wick)", "Mitigation Style", options = ["Touch (wick)", "Close into zone", "CE (50%)"], group = grp_mit, tooltip = "نحوه ثبت میتیگیشن: برخورد شدو، کلوز داخل ناحیه، یا لمس خط میانه")
+enable_ifvg      = input.bool(true, "Convert Broken FVG to Inverse FVG", group = grp_mit, tooltip = "اگر قیمت با بدنه کندل از کل ناحیه عبور کند، ناحیه معکوس (IFVG) می‌شود")
+remove_filled    = input.bool(false, "Remove Zone When Fully Filled", group = grp_mit, tooltip = "حذف ناحیه پس از پر شدن کامل (وقتی IFVG خاموش باشد)")
+show_mitigated   = input.bool(true, "Keep Mitigated Zones (faded)", group = grp_mit, tooltip = "نگه‌داشتن نواحی میتیگیت‌شده با رنگ کم‌رنگ؛ در غیر این صورت حذف می‌شوند")
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  FVG detection — 3-candle imbalance
+//  Bullish FVG: low > high[2]  →  zone = [high[2] , low]
+//  Bearish FVG: high < low[2]  →  zone = [high , low[2]]
+// ═══════════════════════════════════════════════════════════════════════════
+min_gap = thr_mode == "Percent (%)" ? close * fvg_threshold / 100 : thr_mode == "Ticks" ? thr_ticks * syminfo.mintick : 0.0
+
+gap_bull = low - high[2]
+gap_bear = low[2] - high
+
+mid_range       = math.max(high[1] - low[1], syminfo.mintick)
+displacement_ok = body_ratio_min <= 0 or math.abs(close[1] - open[1]) / mid_range >= body_ratio_min
+
+aligned_bull = open[2] < close[2] and open[1] < close[1] and open < close
+aligned_bear = open[2] > close[2] and open[1] > close[1] and open > close
+
+in_session = not use_session or not na(time(timeframe.period, sess))
+
+bull_cond = gap_bull > min_gap and displacement_ok and (not require_aligned or aligned_bull) and in_session
+bear_cond = gap_bear > min_gap and displacement_ok and (not require_aligned or aligned_bear) and in_session
+
+// فقط روی کندل تأییدشده ناحیه می‌سازیم تا در لایو چشمک نزند
+bull_sig = bull_cond and barstate.isconfirmed
+bear_sig = bear_cond and barstate.isconfirmed
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Zone storage
+// ═══════════════════════════════════════════════════════════════════════════
+type FvgZone
+    box   bx
+    line  ce_ln
+    label lbl
+    float top
+    float bot
+    int   left
+    bool  is_bull
+    int   state       // 0 = active, 1 = mitigated (done), 3 = inverse FVG (active)
+    bool  ce_touched
+
+var array<FvgZone> zones = array.new<FvgZone>()
+var int cnt_bull = 0
+var int cnt_bear = 0
+var int cnt_mit  = 0
+var int cnt_fill = 0
+var int cnt_ifvg = 0
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Helper functions
+// ═══════════════════════════════════════════════════════════════════════════
+drop_zone(FvgZone z) =>
+    box.delete(z.bx)
+    if not na(z.ce_ln)
+        line.delete(z.ce_ln)
+    if not na(z.lbl)
+        label.delete(z.lbl)
+
+zone_base_color(FvgZone z) =>
+    z.state == 3 ? col_ifvg : z.is_bull ? col_bull : col_bear
+
+restyle_zone(FvgZone z) =>
+    color base = zone_base_color(z)
+    box.set_bgcolor(z.bx, base)
+    box.set_border_color(z.bx, color.new(base, 25))
+    if not na(z.ce_ln)
+        line.set_color(z.ce_ln, color.new(base, 0))
+    if not na(z.lbl)
+        label.set_color(z.lbl, color.new(base, 0))
+
+// ناحیه میتیگیت‌شده: رنگ کم‌رنگ + توقف تمدید
+mitigate_zone(FvgZone z) =>
+    box.set_bgcolor(z.bx, col_mit)
+    box.set_border_color(z.bx, color.new(col_mit, 20))
+    if not na(z.ce_ln)
+        line.set_color(z.ce_ln, color.new(col_mit, 0))
+    if ext_mode == "Until mitigated"
+        box.set_extend(z.bx, extend.none)
+        box.set_right(z.bx, bar_index)
+        if not na(z.ce_ln)
+            line.set_extend(z.ce_ln, extend.none)
+            line.set_right(z.ce_ln, bar_index)
+    else if bar_index < box.get_right(z.bx)
+        box.set_right(z.bx, bar_index)
+        if not na(z.ce_ln)
+            line.set_right(z.ce_ln, bar_index)
+
+create_zone(bool is_bull) =>
+    float top   = is_bull ? low : low[2]
+    float bot   = is_bull ? high[2] : high
+    color base  = is_bull ? col_bull : col_bear
+    box bx      = box.new(left = bar_index - 2, top = top, right = bar_index, bottom = bot, bgcolor = base, border_color = color.new(base, 25), border_width = 1, extend = ext_mode == "Until mitigated" ? extend.right : extend.none)
+    if ext_mode == "Fixed bars"
+        box.set_right(bx, bar_index + ext_bars)
+    line cel    = na
+    if show_ce
+        cel := line.new(bar_index - 2, (top + bot) / 2, ext_mode == "Fixed bars" ? bar_index + ext_bars : bar_index, (top + bot) / 2, color = color.new(base, 0), style = line.style_dashed, width = 1, extend = ext_mode == "Until mitigated" ? extend.right : extend.none)
+    label lb    = na
+    if show_label
+        lb := label.new(bar_index - 2, is_bull ? bot : top, (is_bull ? "FVG+ " : "FVG- ") + str.tostring(math.round((top - bot) / syminfo.mintick)) + " ticks", style = is_bull ? label.style_label_up : label.style_label_down, color = color.new(base, 0), textcolor = color.white, size = size.tiny)
+    array.push(zones, FvgZone.new(bx = bx, ce_ln = cel, lbl = lb, top = top, bot = bot, left = bar_index - 2, is_bull = is_bull, state = 0, ce_touched = false))
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Create new zones on confirmed bars
+// ═══════════════════════════════════════════════════════════════════════════
+if bull_sig
+    create_zone(true)
+    cnt_bull += 1
+    alert("Bullish FVG detected on " + syminfo.tickerid + " · " + timeframe.period, alert.freq_once_per_bar_close)
+if bear_sig
+    create_zone(false)
+    cnt_bear += 1
+    alert("Bearish FVG detected on " + syminfo.tickerid + " · " + timeframe.period, alert.freq_once_per_bar_close)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Manage existing zones: mitigation / full-fill / inversion (IFVG) / expiry
+// ═══════════════════════════════════════════════════════════════════════════
+mit_events  = 0
+ifvg_events = 0
+
+new_zones = array.new<FvgZone>()
+if array.size(zones) > 0
+    for i = 0 to array.size(zones) - 1
+        z = array.get(zones, i)
+        bool drop_it = false
+
+        // منقضی شدن ناحیه با طول ثابت
+        if ext_mode == "Fixed bars" and z.state != 1 and bar_index > box.get_right(z.bx)
+            drop_it := true
+
+        // فقط از کندلِ بعد از تشکیل، ناحیه قابل معامله است
+        if not drop_it and track_mitigation and z.state != 1 and bar_index > z.left + 2
+            float ce_level      = (z.top + z.bot) / 2
+            bool entered        = z.is_bull ? low <= z.top : high >= z.bot
+            bool ce_hit         = z.is_bull ? low <= ce_level : high >= ce_level
+            bool fully_filled   = z.is_bull ? low <= z.bot : high >= z.top
+            bool closed_through = z.is_bull ? close < z.bot : close > z.top
+
+            if not z.ce_touched and ce_hit
+                z.ce_touched := true
+
+            if closed_through and enable_ifvg
+                // شکست کامل با بدنه → ناحیه معکوس (IFVG) می‌شود
+                z.is_bull   := not z.is_bull
+                z.state     := 3
+                cnt_ifvg    += 1
+                ifvg_events += 1
+                restyle_zone(z)
+            else if fully_filled
+                // گپ کاملاً پر شد (با شدو)
+                cnt_fill += 1
+                if remove_filled or not show_mitigated
+                    drop_it := true
+                else
+                    z.state    := 1
+                    cnt_mit    += 1
+                    mit_events += 1
+                    mitigate_zone(z)
+            else
+                bool mit_now = switch mit_mode
+                    "Touch (wick)"    => entered
+                    "Close into zone" => z.is_bull ? close <= z.top : close >= z.bot
+                    => ce_hit
+                if mit_now
+                    cnt_mit    += 1
+                    mit_events += 1
+                    if show_mitigated
+                        z.state := 1
+                        mitigate_zone(z)
+                    else
+                        drop_it := true
+
+        if drop_it
+            drop_zone(z)
+        else
+            array.push(new_zones, z)
+
+zones := new_zones
+
+// کنترل سقف تعداد نواحی روی نمودار
+while array.size(zones) > max_zones
+    drop_zone(array.shift(zones))
+
+if mit_events > 0
+    alert(str.tostring(mit_events) + " FVG zone(s) mitigated on " + syminfo.tickerid + " · " + timeframe.period, alert.freq_once_per_bar)
+if ifvg_events > 0
+    alert(str.tostring(ifvg_events) + " FVG flipped to Inverse FVG on " + syminfo.tickerid + " · " + timeframe.period, alert.freq_once_per_bar)
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Visuals & alerts
+// ═══════════════════════════════════════════════════════════════════════════
+plotshape(show_shapes and bull_sig, "Bullish FVG", shape.triangleup, location.belowbar, color.new(#089981, 0), size = size.tiny)
+plotshape(show_shapes and bear_sig, "Bearish FVG", shape.triangledown, location.abovebar, color.new(#f23645, 0), size = size.tiny)
+
+mit_sig  = mit_events > 0 and barstate.isconfirmed
+ifvg_sig = ifvg_events > 0 and barstate.isconfirmed
+alertcondition(bull_sig, "Bullish FVG detected", "New Bullish FVG")
+alertcondition(bear_sig, "Bearish FVG detected", "New Bearish FVG")
+alertcondition(mit_sig, "FVG mitigated", "An FVG zone was mitigated")
+alertcondition(ifvg_sig, "Inverse FVG created", "An FVG flipped into an Inverse FVG")
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Stats table
+// ═══════════════════════════════════════════════════════════════════════════
+var table stats = table.new(position.top_right, 2, 7, bgcolor = color.new(color.black, 85), border_width = 1, border_color = color.new(color.gray, 70), frame_width = 1, frame_color = color.new(color.gray, 70))
+if barstate.islast
+    if show_table
+        active_n = 0
+        if array.size(zones) > 0
+            for i = 0 to array.size(zones) - 1
+                z = array.get(zones, i)
+                if z.state != 1
+                    active_n += 1
+        table.clear(stats, 0, 0, 1, 6)
+        table.cell(stats, 0, 0, "FVG PRO", text_color = color.white, text_size = size.small)
+        table.merge_cells(stats, 0, 0, 1, 0)
+        table.cell(stats, 0, 1, "Bullish FVGs", text_color = color.new(#089981, 0), text_size = size.small)
+        table.cell(stats, 1, 1, str.tostring(cnt_bull), text_color = color.white, text_size = size.small)
+        table.cell(stats, 0, 2, "Bearish FVGs", text_color = color.new(#ffd60a, 0), text_size = size.small)
+        table.cell(stats, 1, 2, str.tostring(cnt_bear), text_color = color.white, text_size = size.small)
+        table.cell(stats, 0, 3, "Active zones", text_color = color.new(#2962ff, 0), text_size = size.small)
+        table.cell(stats, 1, 3, str.tostring(active_n), text_color = color.white, text_size = size.small)
+        table.cell(stats, 0, 4, "Mitigated", text_color = color.new(color.gray, 0), text_size = size.small)
+        table.cell(stats, 1, 4, str.tostring(cnt_mit), text_color = color.white, text_size = size.small)
+        table.cell(stats, 0, 5, "Fully filled", text_color = color.new(color.gray, 0), text_size = size.small)
+        table.cell(stats, 1, 5, str.tostring(cnt_fill), text_color = color.white, text_size = size.small)
+        table.cell(stats, 0, 6, "Inverse (IFVG)", text_color = color.new(#ff9100, 0), text_size = size.small)
+        table.cell(stats, 1, 6, str.tostring(cnt_ifvg), text_color = color.white, text_size = size.small)
+    else
+        table.clear(stats, 0, 0, 1, 6)
